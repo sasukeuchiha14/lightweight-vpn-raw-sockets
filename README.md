@@ -54,12 +54,14 @@ pip install -r requirements.txt
 
 ```
 lightweight-vpn-raw-sockets/
-│── vpn.py               # Main VPN script
-│── encryption.py        # Handles AES encryption
-│── key.txt              # Manually shared encryption key
-│── web_interface/       # Flask-based monitoring UI
-│── README.md            # Project documentation
-│── requirements.txt     # Dependencies
+├── main.py                  # Main entry point and application logic
+├── network_scanner.py       # Network scanning functionality
+├── ui_components.py         # UI drawing functions and components
+├── utils.py                 # Utility functions (clipboard, etc.)
+├── vpn.py                   # VPN connectivity (already exists)
+├── encryption.py            # Encryption functions (already exists)
+├── requirements.txt
+└── vpn_key.txt              # Generated key file
 ```
 
 ## 💡 Future Enhancements
