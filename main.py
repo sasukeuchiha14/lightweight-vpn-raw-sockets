@@ -70,17 +70,18 @@ class VPNApplication:
         # Set message callback
         set_message_callback(self.handle_vpn_message)
     
+    # Update the setup_buttons method
     def setup_buttons(self):
         """Initialize all button rectangles"""
         # Main buttons
-        self.back_button = pygame.Rect(20, 20, 100, 40)
+        self.back_button = pygame.Rect(20, 20, 150, 40)  # Widened disconnect button
         
         # Connection buttons
         self.send_button = pygame.Rect(self.WIDTH//2 - 200, self.HEIGHT - 150, 180, 50)
         self.receive_button = pygame.Rect(self.WIDTH//2 + 20, self.HEIGHT - 150, 180, 50)
         
         # VPN toggle
-        self.toggle_vpn_button = pygame.Rect(150, 200, 100, 100)
+        self.toggle_vpn_button = pygame.Rect(100, 150, 100, 100)
         
         # Key management
         self.new_key_button = pygame.Rect(self.WIDTH//2 - 250, 300, 220, 50)
@@ -115,9 +116,17 @@ class VPNApplication:
         else:
             self.log_messages.append(message)
     
+    # Fix the start_vpn_thread method to be more robust
     def start_vpn_thread(self):
         """Start VPN in a separate thread"""
         try:
+            # First make sure any previous VPN is stopped
+            stop_vpn()
+            
+            # Short delay to ensure cleanup
+            time.sleep(0.5)
+            
+            # Start new VPN connection
             if self.connection_type == "send":
                 self.log_message(f"Starting VPN sender to {self.entered_ip}")
                 threading.Thread(target=self.vpn_sender_wrapper, args=(self.entered_ip,), daemon=True).start()
@@ -126,6 +135,15 @@ class VPNApplication:
                 threading.Thread(target=self.vpn_receiver_wrapper, daemon=True).start()
             
             self.vpn_active = True
+            
+            # Queue a connection successful message after a brief delay
+            def send_initial_packet():
+                time.sleep(1)
+                if self.vpn_active:
+                    queue_message("VPN connection established")
+            
+            threading.Thread(target=send_initial_packet, daemon=True).start()
+            
         except Exception as e:
             self.log_message(f"Error starting VPN: {str(e)}")
             self.vpn_active = False
@@ -213,9 +231,12 @@ class VPNApplication:
             connect_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 100, 200, 50)
             self.ui.draw_button("Connect", connect_button, GREEN)
     
+    # Update the draw_connected_screen method
     def draw_connected_screen(self):
         """Draw the connected VPN screen"""
-        self.ui.draw_button("Disconnect", self.back_button, RED)
+        # Wider disconnect button
+        disconnect_button = pygame.Rect(20, 20, 150, 40)
+        self.ui.draw_button("Disconnect", disconnect_button, RED)
         
         # Draw VPN toggle circle
         circle_center = (150, 200)
@@ -274,15 +295,20 @@ class VPNApplication:
             self.screen.blit(stat_surf, (stats_area.x + 20, y_offset))
             y_offset += 30
         
+        # Add test packet button
+        test_packet_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 80, 200, 50)
+        self.ui.draw_button("Send Test Packet", test_packet_button, 
+                         GREEN if self.vpn_active else GRAY)
+        
         # Draw packet transfer logs
-        log_area = pygame.Rect(50, self.HEIGHT - 200, self.WIDTH - 100, 180)
+        log_area = pygame.Rect(50, self.HEIGHT - 200, self.WIDTH - 100, 100)
         pygame.draw.rect(self.screen, LIGHT_GRAY, log_area, border_radius=5)
         
         log_title = self.fonts['normal'].render("Packet Transfer Log", True, BLACK)
         self.screen.blit(log_title, (log_area.x + 10, log_area.y + 5))
         
         y_offset = log_area.y + 40
-        for log in self.transfer_logs[-10:]:  # Show only last 10 logs
+        for log in self.transfer_logs[-5:]:  # Show only last 5 logs
             log_surf = self.fonts['small'].render(log, True, DARK_GRAY)
             self.screen.blit(log_surf, (log_area.x + 15, y_offset))
             y_offset += 20
@@ -378,42 +404,56 @@ class VPNApplication:
         """Handle events for the connected screen"""
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.back_button.collidepoint(event.pos):
-                self.vpn_active = False
-                stop_vpn()
-                self.current_state = self.STATE_CONFIG
+                try:
+                    # Proper cleanup sequence
+                    if self.vpn_active:
+                        stop_vpn()
+                        self.vpn_active = False
+                        self.transfer_logs.append("VPN connection stopped")
+                    self.current_state = self.STATE_CONFIG
+                except Exception as e:
+                    self.log_message(f"Error disconnecting: {str(e)}")
             
             # Toggle VPN
             toggle_rect = pygame.Rect(100, 150, 100, 100)
             if toggle_rect.collidepoint(event.pos):
-                self.vpn_active = not self.vpn_active
-                if self.vpn_active:
-                    self.start_vpn_thread()
-                    self.transfer_logs.append("VPN connection started")
-                else:
-                    stop_vpn()
-                    self.log_message("VPN stopped")
-                    self.transfer_logs.append("VPN connection stopped")
+                try:
+                    self.vpn_active = not self.vpn_active
+                    if self.vpn_active:
+                        self.start_vpn_thread()
+                        self.transfer_logs.append("VPN connection started")
+                    else:
+                        stop_vpn()
+                        self.log_message("VPN stopped")
+                        self.transfer_logs.append("VPN connection stopped")
+                except Exception as e:
+                    self.log_message(f"Error toggling VPN: {str(e)}")
             
-            # Chat input activation
-            if self.chat_input_box.collidepoint(event.pos):
-                self.active_input = "chat"
-            elif self.send_msg_button.collidepoint(event.pos) and self.chat_input.strip():
-                self.chat_messages.append(f"You: {self.chat_input}")
-                # Send the message through VPN
-                queue_message(self.chat_input)
-                self.chat_input = ""
-            else:
-                self.active_input = None
+            # Add a new Test Packet button
+            test_packet_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 80, 200, 50)
+            if test_packet_button.collidepoint(event.pos) and self.vpn_active:
+                try:
+                    # Send a test packet
+                    test_data = f"Test packet: {time.time()}"
+                    queue_message(test_data)
+                    self.log_message("Test packet queued for sending")
+                except Exception as e:
+                    self.log_message(f"Error sending test packet: {str(e)}")
     
+    # Update the handle_key_events method to remove chat references
     def handle_key_events(self, event):
         """Handle keyboard events"""
         if event.key == pygame.K_ESCAPE:
-            if self.current_state == self.STATE_CONNECTED:
-                self.vpn_active = False
-                stop_vpn()
-                self.current_state = self.STATE_CONFIG
-            elif self.current_state == self.STATE_CONFIG:
-                self.current_state = self.STATE_IP_ENTRY
+            try:
+                if self.current_state == self.STATE_CONNECTED:
+                    if self.vpn_active:
+                        stop_vpn()
+                    self.vpn_active = False
+                    self.current_state = self.STATE_CONFIG
+                elif self.current_state == self.STATE_CONFIG:
+                    self.current_state = self.STATE_IP_ENTRY
+            except Exception as e:
+                self.log_message(f"Error disconnecting: {str(e)}")
         
         # Handle Ctrl+V for paste
         ctrl_pressed = pygame.key.get_mods() & pygame.KMOD_CTRL
@@ -439,23 +479,6 @@ class VPNApplication:
                 if event.unicode in "0123456789.":
                     self.entered_ip += event.unicode
         
-        elif self.active_input == "chat":
-            if event.key == pygame.K_RETURN:
-                if self.chat_input.strip():
-                    self.chat_messages.append(f"You: {self.chat_input}")
-                    # Send the message through VPN
-                    queue_message(self.chat_input)
-                    self.chat_input = ""
-            elif event.key == pygame.K_BACKSPACE:
-                self.chat_input = self.chat_input[:-1]
-            elif ctrl_pressed and event.key == pygame.K_v:
-                # Paste text into chat
-                clipboard_text = self.get_clipboard_text()
-                if clipboard_text:
-                    self.chat_input += clipboard_text
-            else:
-                self.chat_input += event.unicode
-        
         elif self.active_input == "key" and self.current_state == self.STATE_CONFIG:
             if event.key == pygame.K_RETURN:
                 # Save the entered key
@@ -472,8 +495,10 @@ class VPNApplication:
                     if hex_chars:
                         self.key_text = hex_chars
                         self.log_message("Pasted encryption key")
+                        self.ui.show_popup("Key pasted from clipboard")
                     else:
                         self.log_message("Clipboard doesn't contain valid hex characters")
+                        self.ui.show_popup("No valid key found in clipboard")
             else:
                 # Only allow hex characters (0-9, a-f)
                 if event.unicode.lower() in "0123456789abcdef":
