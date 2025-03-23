@@ -149,6 +149,8 @@ def send_message(sock, message):
     try:
         encrypted_data = encrypt_message(message)
         sock.sendall(encrypted_data)
+        if message_callback:
+            message_callback(message, "packet_sent")
         return True
     except Exception as e:
         if message_callback:

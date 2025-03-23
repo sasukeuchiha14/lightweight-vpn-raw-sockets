@@ -7,7 +7,7 @@ import re
 import time
 
 # Import our modules
-from ui_components import UIComponents, WHITE, BLACK, GREEN, BLUE, RED, DARK_GREEN, GRAY, DARK_GRAY
+from ui_components import UIComponents, WHITE, BLACK, GREEN, BLUE, RED, DARK_GREEN, LIGHT_GRAY, GRAY, DARK_GRAY
 from utils import copy_to_clipboard, KeyManager
 from vpn import vpn_sender, vpn_receiver, set_message_callback, queue_message, stop_vpn
 from encryption import generate_key, load_key, save_key
@@ -45,14 +45,20 @@ class VPNApplication:
         self.vpn_active = False
         self.connection_type = None  # "send" or "receive"
         self.entered_ip = ""
-        self.chat_messages = []
         self.log_messages = []
+        self.transfer_logs = []  # For packet transfer information
         self.key_text = ""
         self.using_existing_key = False
         
         # Text inputs
-        self.chat_input = ""
         self.active_input = "ip"  # Start with IP input active
+        
+        # Stats
+        self.packets_sent = 0
+        self.packets_received = 0
+        self.bytes_transferred = 0
+        self.connection_time = 0
+        self.connection_start_time = 0
         
         # Copy button state flag
         self.copy_button_clicked = False
@@ -82,10 +88,6 @@ class VPNApplication:
         self.upload_key_button = pygame.Rect(self.WIDTH//2 + 30, 370, 220, 50)
         self.copy_key_button = pygame.Rect(self.WIDTH//2 + 310, 200, 80, 40)
         
-        # Chat elements
-        self.chat_input_box = pygame.Rect(self.WIDTH//2 + 50, self.HEIGHT - 50, 300, 40)
-        self.send_msg_button = pygame.Rect(self.WIDTH - 100, self.HEIGHT - 50, 80, 40)
-        
         # IP input
         self.ip_input_box = pygame.Rect(self.WIDTH//2 - 150, self.HEIGHT//2 - 50, 300, 40)
     
@@ -96,7 +98,20 @@ class VPNApplication:
     def handle_vpn_message(self, message, msg_type="info"):
         """Handle messages from the VPN module"""
         if msg_type == "message":
-            self.chat_messages.append(message)
+            # Track as packet transfer
+            self.packets_received += 1
+            self.bytes_transferred += len(message)
+            self.transfer_logs.append(f"Packet received: {len(message)} bytes")
+            # Keep only the last 20 transfer logs
+            if len(self.transfer_logs) > 20:
+                self.transfer_logs.pop(0)
+        elif msg_type == "packet_sent":
+            self.packets_sent += 1
+            self.bytes_transferred += len(message)
+            self.transfer_logs.append(f"Packet sent: {len(message)} bytes")
+            # Keep only the last 20 transfer logs
+            if len(self.transfer_logs) > 20:
+                self.transfer_logs.pop(0)
         else:
             self.log_messages.append(message)
     
@@ -216,17 +231,61 @@ class VPNApplication:
         ip_surf = self.fonts['normal'].render(ip_text, True, BLACK)
         self.screen.blit(ip_surf, (circle_center[0] - ip_surf.get_width()//2, circle_center[1] + 90))
         
-        # Draw chat area
-        chat_area = pygame.Rect(self.WIDTH//2 + 50, 100, self.WIDTH//2 - 100, self.HEIGHT - 200)
-        self.ui.draw_chat(chat_area, self.chat_messages)
+        # Update connection time
+        if self.vpn_active:
+            if self.connection_start_time == 0:
+                self.connection_start_time = time.time()
+            self.connection_time = time.time() - self.connection_start_time
+        else:
+            self.connection_start_time = 0
         
-        # Draw chat input with cursor
-        self.ui.draw_input_box(self.chat_input_box, self.chat_input, self.active_input == "chat")
-        self.ui.draw_button("Send", self.send_msg_button)
+        # Draw packet statistics
+        stats_area = pygame.Rect(self.WIDTH//2 + 50, 100, self.WIDTH//2 - 100, 200)
+        pygame.draw.rect(self.screen, LIGHT_GRAY, stats_area, border_radius=5)
+        pygame.draw.rect(self.screen, BLACK, stats_area, 2, border_radius=5)
         
-        # Draw logs
-        log_area = pygame.Rect(50, self.HEIGHT - 150, self.WIDTH//2 - 100, 130)
-        self.ui.draw_logs(log_area, self.log_messages)
+        stats_title = self.fonts['normal'].render("VPN Statistics", True, BLACK)
+        self.screen.blit(stats_title, (stats_area.x + 10, stats_area.y + 10))
+        
+        # Format connection time as mm:ss
+        minutes = int(self.connection_time // 60)
+        seconds = int(self.connection_time % 60)
+        time_str = f"{minutes:02d}:{seconds:02d}"
+        
+        # Format bytes transferred in appropriate units
+        if self.bytes_transferred < 1024:
+            bytes_str = f"{self.bytes_transferred} B"
+        elif self.bytes_transferred < 1024*1024:
+            bytes_str = f"{self.bytes_transferred/1024:.2f} KB"
+        else:
+            bytes_str = f"{self.bytes_transferred/(1024*1024):.2f} MB"
+        
+        # Display stats
+        stats = [
+            f"Connection time: {time_str}",
+            f"Packets sent: {self.packets_sent}",
+            f"Packets received: {self.packets_received}",
+            f"Data transferred: {bytes_str}"
+        ]
+        
+        y_offset = stats_area.y + 50
+        for stat in stats:
+            stat_surf = self.fonts['small'].render(stat, True, BLACK)
+            self.screen.blit(stat_surf, (stats_area.x + 20, y_offset))
+            y_offset += 30
+        
+        # Draw packet transfer logs
+        log_area = pygame.Rect(50, self.HEIGHT - 200, self.WIDTH - 100, 180)
+        pygame.draw.rect(self.screen, LIGHT_GRAY, log_area, border_radius=5)
+        
+        log_title = self.fonts['normal'].render("Packet Transfer Log", True, BLACK)
+        self.screen.blit(log_title, (log_area.x + 10, log_area.y + 5))
+        
+        y_offset = log_area.y + 40
+        for log in self.transfer_logs[-10:]:  # Show only last 10 logs
+            log_surf = self.fonts['small'].render(log, True, DARK_GRAY)
+            self.screen.blit(log_surf, (log_area.x + 15, y_offset))
+            y_offset += 20
     
     def handle_ip_entry_events(self, event):
         """Handle events for the IP entry screen"""
@@ -329,9 +388,11 @@ class VPNApplication:
                 self.vpn_active = not self.vpn_active
                 if self.vpn_active:
                     self.start_vpn_thread()
+                    self.transfer_logs.append("VPN connection started")
                 else:
                     stop_vpn()
                     self.log_message("VPN stopped")
+                    self.transfer_logs.append("VPN connection stopped")
             
             # Chat input activation
             if self.chat_input_box.collidepoint(event.pos):
@@ -344,7 +405,6 @@ class VPNApplication:
             else:
                 self.active_input = None
     
-    # Update the handle_key_events method to add clipboard paste functionality
     def handle_key_events(self, event):
         """Handle keyboard events"""
         if event.key == pygame.K_ESCAPE:
