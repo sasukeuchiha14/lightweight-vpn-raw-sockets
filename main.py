@@ -20,7 +20,7 @@ class VPNApplication:
         # Screen settings
         self.WIDTH, self.HEIGHT = 900, 600
         self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
-        pygame.display.setCaption("Lightweight VPN")
+        pygame.display.set_caption("Lightweight VPN")
         
         # Fonts
         self.fonts = {
