@@ -1,117 +1,105 @@
 import os
-import random
-import binascii
+import hashlib
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
-import platform
 
 # Constants
-KEY_SIZE = 32  # 256 bits
-KEY_FILE = "vpn_key.txt"
+DEFAULT_KEY_PATH = "vpn_key.txt"
 
-def get_key_path(local=False):
-    """Get the path for the key file
-    
-    Args:
-        local: If True, save in the current directory instead of the system location
-    """
-    if local:
-        # Save in the current directory
-        return os.path.join(os.getcwd(), KEY_FILE)
-    
-    # Otherwise use platform-specific paths
-    if platform.system() == "Windows":
-        key_dir = os.path.join(os.getenv("APPDATA"), "LightweightVPN")
-    else:  # Linux/Mac
-        key_dir = os.path.join(os.path.expanduser("~"), ".lightweight_vpn")
-    
-    # Ensure directory exists
-    if not os.path.exists(key_dir):
-        os.makedirs(key_dir)
-    
-    return os.path.join(key_dir, KEY_FILE)
-
-def generate_key(local=True):
-    """Generate a new random encryption key and save it to file
-    
-    Args:
-        local: If True, save in the current directory for easy sharing
-    """
-    key = os.urandom(KEY_SIZE)  # Generate random 256-bit key
-    
-    # Save key to file
-    key_path = get_key_path(local)
-    with open(key_path, "wb") as f:
+def generate_key(local=False):
+    """Generate a random 256-bit key and save it"""
+    key = os.urandom(32)  # 32 bytes = 256 bits
+    save_path = DEFAULT_KEY_PATH if local else os.path.expanduser("~/.vpn_key")
+    with open(save_path, 'wb') as f:
         f.write(key)
-    
     return key
 
-def load_key():
-    """Load the encryption key from file or generate a new one"""
-    key_path = get_key_path()
-    
-    if os.path.exists(key_path):
-        with open(key_path, "rb") as f:
-            key = f.read()
-        return key
-    else:
-        # No key exists, generate and save a new one
-        return generate_key()
+def load_key(local=False):
+    """Load the encryption key"""
+    try:
+        path = DEFAULT_KEY_PATH if local else os.path.expanduser("~/.vpn_key")
+        with open(path, 'rb') as f:
+            key_data = f.read()
+            
+        # Check if it's a hex string or binary
+        if len(key_data) == 64:  # Hex string would be 64 chars for 32 bytes
+            try:
+                # Try to decode as hex string
+                return bytes.fromhex(key_data.decode('utf-8'))
+            except:
+                pass
+                
+        return key_data
+    except FileNotFoundError:
+        # Generate a new key if none exists
+        return generate_key(local)
 
-def save_key(key_data, local=True):
-    """Save a given key to the key file
+def save_key(key_data, local=False):
+    """Save a key from hex string or bytes"""
+    save_path = DEFAULT_KEY_PATH if local else os.path.expanduser("~/.vpn_key")
     
-    Args:
-        key_data: The key data (hex string or bytes)
-        local: If True, save in the current directory for easy sharing
-    """
-    # Convert from hex string if needed
+    # Handle hex string
     if isinstance(key_data, str):
-        key_data = binascii.unhexlify(key_data)
-    
-    key_path = get_key_path(local)
-    with open(key_path, "wb") as f:
-        f.write(key_data)
+        # Convert hex string to bytes
+        key_bytes = bytes.fromhex(key_data)
+    else:
+        # Already bytes
+        key_bytes = key_data
+        
+    # Ensure key is 32 bytes (256 bits)
+    if len(key_bytes) != 32:
+        raise ValueError("Key must be exactly 32 bytes (256 bits)")
+        
+    with open(save_path, 'wb') as f:
+        f.write(key_bytes)
 
-def encrypt_message(message):
-    """Encrypt a message using the VPN key"""
-    # Convert string to bytes if needed
-    if isinstance(message, str):
-        message = message.encode('utf-8')
-    
-    # Load the key
+def encrypt_data(data):
+    """Encrypt data using the stored key"""
     key = load_key()
     
-    # Generate a random IV (initialization vector)
+    # Generate a random IV
     iv = os.urandom(16)
     
-    # Create AES cipher
+    # Create an encryptor
     cipher = AES.new(key, AES.MODE_CBC, iv)
     
-    # Pad and encrypt the message
-    padded_message = pad(message, AES.block_size)
-    encrypted_message = cipher.encrypt(padded_message)
+    # PKCS7 padding
+    padded_data = pad(data, AES.block_size)
     
-    # Prepend the IV to the encrypted message
-    return iv + encrypted_message
+    # Encrypt the data
+    encrypted_data = cipher.encrypt(padded_data)
+    
+    # Return IV + encrypted data
+    return iv + encrypted_data
 
-def decrypt_message(encrypted_data):
-    """Decrypt a message using the VPN key"""
-    # Load the key
+def decrypt_data(encrypted_data):
+    """Decrypt data using the stored key"""
     key = load_key()
     
-    # Extract the IV (first 16 bytes)
+    # Extract IV and ciphertext
     iv = encrypted_data[:16]
-    encrypted_message = encrypted_data[16:]
+    ciphertext = encrypted_data[16:]
     
-    # Create AES cipher
+    # Create a decryptor
     cipher = AES.new(key, AES.MODE_CBC, iv)
     
-    # Decrypt and unpad the message
-    decrypted_message = unpad(cipher.decrypt(encrypted_message), AES.block_size)
+    # Decrypt the data
+    padded_data = cipher.decrypt(ciphertext)
     
-    # Return as string
-    return decrypted_message.decode('utf-8')
+    # Remove PKCS7 padding
+    return unpad(padded_data, AES.block_size)
+
+# Helper functions for encryption-based operations
+def encrypt_message(message):
+    """Encrypt a text message"""
+    if isinstance(message, str):
+        return encrypt_data(message.encode('utf-8'))
+    return encrypt_data(message)
+
+def decrypt_message(encrypted_message):
+    """Decrypt a message to text"""
+    decrypted_data = decrypt_data(encrypted_message)
+    return decrypted_data.decode('utf-8')
 
 # Run a test
 if __name__ == "__main__":
