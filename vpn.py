@@ -4,7 +4,7 @@ import time
 import os
 import sys
 import platform
-from encryption import encrypt_data, decrypt_data
+from encryption import encrypt_data, decrypt_data, load_key
 
 # VPN constants - make port configurable
 VPN_PORT = 8989  # Default VPN port
@@ -139,20 +139,21 @@ def handle_incoming_data(sock, client_address):
                         else:
                             # This is the critical line to make sure packets appear in the transfer log
                             message_callback(message, "message")
-                            
+                        
                 except Exception as e:
                     if message_callback:
                         message_callback(f"Error decrypting message: {str(e)}", "error")
-                        # Try to extract key information
                         try:
+                            # Display key fingerprint for debugging
+                            from encryption import load_key
                             key_hex = load_key().hex()
-                            key_info = f"Key first/last 8 chars: {key_hex[:8]}...{key_hex[-8:]}"
+                            key_info = f"Key fingerprint: {key_hex[:8]}...{key_hex[-8:]}"
                             message_callback(f"Using key: {key_info}", "info")
-                        except:
-                            message_callback("Could not get key info", "error")
+                        except Exception as key_error:
+                            message_callback(f"Could not read key: {str(key_error)}", "error")
                         
-                        # Log the packet info even when decryption fails
-                        message_callback(f"DECRYPTION_FAILED_PACKET_{bytes_received}", "message")
+                        # Log as a failed packet - don't count in statistics
+                        message_callback(f"DECRYPTION_FAILED_{time.time()}", "decryption_failed")
                 
             except socket.timeout:
                 # Just a timeout, continue the loop

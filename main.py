@@ -116,6 +116,8 @@ class VPNApplication:
             if "TEST_PACKET" in message or "test packet" in message.lower():
                 # Make test packets more visible in logs
                 log_entry = f"[{current_time}] 📦 Test packet received: {len(message)} bytes"
+            elif "KEY_VERIFICATION" in message:
+                log_entry = f"[{current_time}] 🔑 Key verification packet received: {len(message)} bytes"
             else:
                 log_entry = f"[{current_time}] 📥 Packet received: {len(message)} bytes"
             
@@ -124,6 +126,19 @@ class VPNApplication:
             
             # Print to console for easier debugging
             print(f"RECEIVED: {log_entry}")
+            
+            # Limit log history
+            while len(self.transfer_logs) > 10:
+                self.transfer_logs.pop(0)
+    
+        elif msg_type == "decryption_failed":
+            # Log decryption failures but don't count as received packets
+            log_entry = f"[{current_time}] ❌ Decryption failed - keys may not match!"
+            self.transfer_logs.append(log_entry)
+            print(f"ERROR: {log_entry}")
+            
+            # Show popup about potential key mismatch
+            self.ui.show_popup("Decryption failed - keys may not match!", 3.0)
             
             # Limit log history
             while len(self.transfer_logs) > 10:
@@ -161,10 +176,22 @@ class VPNApplication:
             while len(self.log_messages) > 15:
                 self.log_messages.pop(0)
     
-    # Update the start_vpn_thread method to remove the auto-message that might cause issues
+    # Update the start_vpn_thread method to include key checks
     def start_vpn_thread(self):
-        """Start VPN in a separate thread with improved stability"""
+        """Start VPN in a separate thread with improved stability and key checks"""
         try:
+            # Verify we can load the key before connecting
+            try:
+                from encryption import load_key
+                key = load_key()
+                if len(key) != 32:  # Must be 32 bytes (256 bits)
+                    self.log_message(f"Warning: Key size is {len(key)} bytes, expected 32 bytes")
+                    self.ui.show_popup("Warning: Encryption key may be invalid", 3.0)
+            except Exception as key_error:
+                self.log_message(f"Error loading encryption key: {str(key_error)}")
+                self.ui.show_popup("Error loading encryption key", 3.0)
+                return
+                
             # First make sure any previous VPN is stopped
             stop_vpn()
             
@@ -188,6 +215,9 @@ class VPNApplication:
             
             self.vpn_active = True
             self.transfer_logs.append("VPN connection initialized")
+            
+            # Log key fingerprint for reference
+            self.check_key_compatibility()
             
         except Exception as e:
             self.log_message(f"Error starting VPN: {str(e)}")
@@ -825,19 +855,22 @@ class VPNApplication:
             
         return result
     
-    # Add this method to your VPNApplication class
+    # Update the verify_vpn_keys method
     def verify_vpn_keys(self):
         """Verifies that both sides are using the same encryption key by sending a test packet"""
         if not self.vpn_active:
             self.ui.show_popup("VPN must be active to verify keys", 2.0)
             return False
             
+        # First check and display our key fingerprint
+        self.check_key_compatibility()
+        
         try:
             # Generate a simple test string with current timestamp
             test_data = f"KEY_VERIFICATION_TEST_{time.time()}"
             self.log_message(f"Sending key verification packet: {test_data}")
             
-            # Start a thread to monitor if we get a response
+            # Show instructions for key verification
             if self.connection_type == "send":
                 # Use direct send method to verify connection
                 from vpn import active_connections, send_message
@@ -847,7 +880,7 @@ class VPNApplication:
                 if connection_id in active_connections:
                     sock = active_connections[connection_id]
                     if send_message(sock, test_data):
-                        self.ui.show_popup("Verification packet sent - check receiver logs", 3.0)
+                        self.ui.show_popup("Verification packet sent - match fingerprints with receiver", 3.0)
                         return True
                     else:
                         self.ui.show_popup("Failed to send verification packet", 2.0)
@@ -857,13 +890,54 @@ class VPNApplication:
                     return False
             else:
                 # For receiver, we can only wait for incoming packets
-                self.ui.show_popup("Receiver ready - send test packet from sender", 3.0)
+                self.ui.show_popup("Compare key fingerprint with sender's", 3.0)
                 return True
                 
         except Exception as e:
             self.log_message(f"Key verification error: {str(e)}")
             self.ui.show_popup(f"Verification error: {str(e)}", 2.0)
             return False
+    
+    def check_key_compatibility(self):
+        """Verify if sender and receiver are using the same encryption key"""
+        try:
+            # Get key info for debugging
+            from encryption import load_key
+            key = load_key()
+            key_hex = key.hex()
+            
+            # Log key fingerprint (first and last 4 bytes only - for security)
+            key_fingerprint = f"{key_hex[:8]}...{key_hex[-8:]}"
+            self.log_message(f"Using encryption key with fingerprint: {key_fingerprint}")
+            
+            # Add key fingerprint to status display
+            self.transfer_logs.append(f"Key fingerprint: {key_fingerprint}")
+            
+            # Show popup with key info
+            self.ui.show_popup(f"Key fingerprint: {key_fingerprint}", 4.0)
+            return True
+        except Exception as e:
+            self.log_message(f"Error checking key: {str(e)}")
+            self.ui.show_popup("Error retrieving key info", 3.0)
+            return False
+    
+    # Add a method to show key mismatch help
+    def show_key_mismatch_help(self):
+        """Show instructions for fixing a key mismatch"""
+        self.log_message("Detected potential key mismatch between sender and receiver")
+        
+        help_text = [
+            "If you're seeing decryption errors:",
+            "1. Both sender and receiver must use the same exact key",
+            "2. Generate a new key on sender and use 'Copy' button",
+            "3. On receiver, click 'Paste' to use the exact same key",
+            "4. Reconnect both sides after ensuring keys match"
+        ]
+        
+        for line in help_text:
+            self.log_message(line)
+        
+        self.ui.show_popup("See log for key mismatch help", 3.0)
     
     # Update the run method to draw popups
     def run(self):
