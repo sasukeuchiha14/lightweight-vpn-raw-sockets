@@ -27,13 +27,25 @@ def set_vpn_port(port):
     if message_callback:
         message_callback(f"VPN port set to {VPN_PORT}", "info")
 
+# Update the queue_message function to prioritize test packets
 def queue_message(message):
-    """Add a message to the outgoing queue"""
+    """Add a message to the outgoing queue with test packet prioritization"""
     global message_queue
     if message:
+        # Check if this is a test packet (for better debugging)
+        is_test = "TEST_PACKET" in message or "test packet" in message.lower()
+        
         if message_callback:
-            message_callback(f"Queuing message: '{message[:20]}...' ({len(message)} bytes)", "info")
-        message_queue.append(message)
+            if is_test:
+                message_callback(f"Queuing TEST PACKET: '{message[:30]}...' ({len(message)} bytes)", "info")
+            else:
+                message_callback(f"Queuing message: '{message[:20]}...' ({len(message)} bytes)", "info")
+        
+        # Add test packets to the front of the queue for immediate sending
+        if is_test:
+            message_queue.insert(0, message)
+        else:
+            message_queue.append(message)
         return True
     return False
 

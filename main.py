@@ -5,7 +5,8 @@ import os
 import platform
 import re
 import time
-import socket  # Add this missing import
+import socket
+import subprocess
 
 # Import our modules
 from ui_components import UIComponents, WHITE, BLACK, GREEN, BLUE, RED, DARK_GREEN, LIGHT_GRAY, GRAY, DARK_GRAY
@@ -219,7 +220,7 @@ class VPNApplication:
             self.ui.draw_button("Send Mode", self.send_button)
             self.ui.draw_button("Receive Mode", self.receive_button)
     
-    # Add a port test button in your draw_config_screen method
+    # Update the draw_config_screen method to add connection test for both modes
     def draw_config_screen(self):
         """Draw the VPN configuration screen"""
         self.ui.draw_button("Back", self.back_button)
@@ -228,8 +229,18 @@ class VPNApplication:
         title_surf = self.fonts['title'].render(title_text, True, BLACK)
         self.screen.blit(title_surf, (self.WIDTH//2 - title_surf.get_width()//2, 30))
         
-        # Show connecting IP address
-        ip_text = f"IP: {self.entered_ip}"
+        # Show connecting IP address (for sender) or listening status (for receiver)
+        if self.connection_type == "send":
+            ip_text = f"Target IP: {self.entered_ip}"
+        else:
+            # Get and display your own IP
+            try:
+                hostname = socket.gethostname()
+                local_ip = socket.gethostbyname(hostname)
+                ip_text = f"Listening on: {local_ip}:8989"
+            except:
+                ip_text = "Listening on: localhost:8989"
+                
         ip_surf = self.fonts['normal'].render(ip_text, True, BLACK)
         self.screen.blit(ip_surf, (self.WIDTH//2 - ip_surf.get_width()//2, 80))
         
@@ -264,10 +275,12 @@ class VPNApplication:
             connect_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 100, 200, 50)
             self.ui.draw_button("Connect", connect_button, GREEN)
         
-        # Add a port test button if in send mode
+        # Add a port test button for both sender and receiver
+        port_test_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 50, 200, 40)
         if self.connection_type == "send":
-            port_test_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 50, 200, 40)
             self.ui.draw_button("Test Connection", port_test_button, BLUE)
+        else:
+            self.ui.draw_button("Test Listening Port", port_test_button, BLUE)
     
     # Update the draw_connected_screen method to only show test packet button in send mode
     def draw_connected_screen(self):
@@ -375,7 +388,7 @@ class VPNApplication:
                     self.connection_type = "receive"
                     self.current_state = self.STATE_CONFIG
     
-    # Update handle_config_screen_events to add the port test
+    # Update handle_config_screen_events to add the port test for both modes
     def handle_config_screen_events(self, event):
         """Handle events for the configuration screen"""
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -383,7 +396,26 @@ class VPNApplication:
                 self.current_state = self.STATE_IP_ENTRY
                 self.using_existing_key = False
             
-            elif self.connection_type == "send":
+            # Test Connection button - for both sender and receiver
+            port_test_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 50, 200, 40)
+            if port_test_button.collidepoint(event.pos):
+                if self.connection_type == "send":
+                    # Test connection to remote server for sender
+                    threading.Thread(
+                        target=self.test_port_connection,
+                        args=(self.entered_ip, 8989),
+                        daemon=True
+                    ).start()
+                else:
+                    # Test local listening port for receiver
+                    threading.Thread(
+                        target=self.test_listening_port,
+                        args=(8989,),
+                        daemon=True
+                    ).start()
+                    
+            # Now handle the key management buttons
+            if self.connection_type == "send":
                 if self.new_key_button.collidepoint(event.pos):
                     # Generate a new key and show popup
                     self.key_text, self.using_existing_key = self.key_manager.handle_key_management(
@@ -446,14 +478,8 @@ class VPNApplication:
                             self.ui.show_popup("Key pasted from clipboard")
                         else:
                             self.ui.show_popup("No valid key found in clipboard")
-            
-            # Add port test button handler
-            if self.connection_type == "send":
-                port_test_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 50, 200, 40)
-                if port_test_button.collidepoint(event.pos):
-                    self.test_port_connection(self.entered_ip, 8989)  # Test VPN port
     
-    # Update the handle_connected_screen_events method to only process test packet in send mode
+    # Update the handle_connected_screen_events method to fix test packet sending
     def handle_connected_screen_events(self, event):
         """Handle events for the connected screen"""
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -488,12 +514,33 @@ class VPNApplication:
                 test_packet_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 80, 200, 50)
                 if test_packet_button.collidepoint(event.pos) and self.vpn_active:
                     try:
-                        # Send a test packet
-                        test_data = f"Test packet: {time.time()}"
-                        queue_message(test_data)
-                        self.log_message("Test packet queued for sending")
+                        # Create a more distinctive test packet
+                        test_data = f"EXPLICIT_TEST_PACKET_{time.time()}"
+                        self.log_message(f"Sending test packet: {test_data}")
+                        
+                        # Use direct method from vpn module for more reliable sending
+                        from vpn import active_connections
+                        
+                        # Get the correct connection from active connections
+                        connection_id = f"{self.entered_ip}:8989"  # Hardcoded port for now
+                        if connection_id in active_connections:
+                            sock = active_connections[connection_id]
+                            from vpn import send_message
+                            send_result = send_message(sock, test_data)
+                            if send_result:
+                                self.log_message("Test packet sent directly to connection")
+                                self.ui.show_popup("Test packet sent", 2.0)
+                            else:
+                                self.log_message("Failed to send test packet directly")
+                                self.ui.show_popup("Failed to send test packet", 2.0)
+                        else:
+                            # Fall back to queue if direct connection not found
+                            self.log_message("No active connection found, queueing test packet")
+                            queue_message(test_data)
+                            self.ui.show_popup("Test packet queued for sending", 2.0)
                     except Exception as e:
                         self.log_message(f"Error sending test packet: {str(e)}")
+                        self.ui.show_popup(f"Error: {str(e)}", 2.0)
     
     # Update the handle_key_events method to remove chat references
     def handle_key_events(self, event):
@@ -592,23 +639,125 @@ class VPNApplication:
     
     # Add this function to your VPNApplication class
     def test_port_connection(self, ip, port):
-        """Test if a port is open on the target IP"""
+        """Test if a port is open on the target IP with popup feedback"""
+        self.log_message(f"Testing connection to {ip}:{port}...")
+        self.ui.show_popup(f"Testing connection to {ip}...", 1.0)
+        
+        # Run ping test to check basic connectivity
+        ping_success = self.ping_test(ip)
+        
+        if not ping_success:
+            self.log_message(f"❌ Cannot reach host {ip} (ping failed)")
+            self.ui.show_popup(f"IP Unreachable: Cannot reach {ip}", 3.0)
+            return False
+            
+        # If ping successful, test the specific port
         try:
-            self.log_message(f"Testing connection to {ip}:{port}...")
             test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            test_socket.settimeout(5)
+            test_socket.settimeout(3)
             result = test_socket.connect_ex((ip, port))
             test_socket.close()
             
             if result == 0:
-                self.log_message(f"✅ Port {port} is OPEN on {ip}")
+                self.log_message(f"✅ Host reachable and Port {port} is OPEN on {ip}")
+                self.ui.show_popup(f"Connection successful to {ip}:{port}", 3.0)
                 return True
             else:
-                self.log_message(f"❌ Port {port} is CLOSED on {ip} (Error code: {result})")
+                self.log_message(f"⚠️ Host reachable but Port {port} is CLOSED on {ip} (Error code: {result})")
+                self.ui.show_popup(f"Port {port} is closed on {ip}", 3.0)
                 return False
         except Exception as e:
             self.log_message(f"❌ Error testing port: {str(e)}")
+            self.ui.show_popup(f"Connection error: {str(e)}", 3.0)
             return False
+
+    def ping_test(self, host, count=2):
+        """Test if host is reachable using ping"""
+        try:
+            self.log_message(f"Pinging {host}...")
+            
+            # Different ping command based on platform
+            if platform.system().lower() == "windows":
+                command = ["ping", "-n", str(count), "-w", "1000", host]
+            else:
+                command = ["ping", "-c", str(count), "-W", "1", host]
+                
+            # Run the ping command
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+            output = stdout.decode()
+            
+            # Check for successful pings
+            if platform.system().lower() == "windows":
+                success = "TTL=" in output
+            else:
+                success = "bytes from" in output
+                
+            packet_loss = "100% packet loss" in output or "100% loss" in output
+            
+            if success and not packet_loss:
+                self.log_message("✅ Ping successful")
+                return True
+            else:
+                self.log_message(f"❌ Ping failed: {packet_loss}")
+                return False
+                
+        except Exception as e:
+            self.log_message(f"❌ Ping error: {str(e)}")
+            return False
+    
+    # Add this method to test listening port for receiver mode
+    def test_listening_port(self, port):
+        """Test if the listening port is available and working"""
+        self.log_message(f"Testing if port {port} is available for listening...")
+        self.ui.show_popup(f"Testing port {port}...", 1.0)
+        
+        try:
+            # Try to create a test socket and bind to the port
+            test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_socket.settimeout(1)
+            
+            # Enable address reuse to avoid "port in use" errors
+            test_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            
+            try:
+                test_socket.bind(('0.0.0.0', port))
+                test_socket.listen(1)
+                
+                # Port is available for listening
+                self.log_message(f"✅ Port {port} is available for listening")
+                
+                # Get my IP address for display
+                try:
+                    hostname = socket.gethostname()
+                    local_ip = socket.gethostbyname(hostname)
+                    self.ui.show_popup(f"Listening successful on {local_ip}:{port}", 3.0)
+                except:
+                    self.ui.show_popup(f"Listening successful on port {port}", 3.0)
+                
+                result = True
+            except OSError as e:
+                if "in use" in str(e).lower() or "being used" in str(e).lower():
+                    # The port is in use - could be our own VPN or another app
+                    self.log_message(f"⚠️ Port {port} is already in use - may be your VPN receiver")
+                    self.ui.show_popup(f"Port {port} already in use - VPN may be running", 3.0)
+                    # This might not be an error if our VPN is already running
+                    result = "in_use"
+                else:
+                    self.log_message(f"❌ Port binding error: {str(e)}")
+                    self.ui.show_popup(f"Port error: {str(e)}", 3.0)
+                    result = False
+        except Exception as e:
+            self.log_message(f"❌ Error testing listening port: {str(e)}")
+            self.ui.show_popup(f"Test error: {str(e)}", 3.0)
+            result = False
+        finally:
+            try:
+                test_socket.close()
+            except:
+                pass
+            
+        return result
     
     # Update the run method to draw popups
     def run(self):
