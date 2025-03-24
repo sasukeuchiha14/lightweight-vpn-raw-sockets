@@ -26,13 +26,15 @@ def vpn_sender(target_ip, message=None):
     """
     global running
     
+    # Initialize connection_id before the try block to prevent UnboundLocalError
+    connection_id = f"{target_ip}:{VPN_PORT}"
+    
     try:
         # Create a socket connection
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect((target_ip, VPN_PORT))
         
         # Store the connection
-        connection_id = f"{target_ip}:{VPN_PORT}"
         active_connections[connection_id] = sock
         
         # Start a thread to receive messages

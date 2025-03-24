@@ -5,6 +5,7 @@ import os
 import platform
 import re
 import time
+import socket  # Add this missing import
 
 # Import our modules
 from ui_components import UIComponents, WHITE, BLACK, GREEN, BLUE, RED, DARK_GREEN, LIGHT_GRAY, GRAY, DARK_GRAY
