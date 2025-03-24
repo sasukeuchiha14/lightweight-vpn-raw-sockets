@@ -87,7 +87,7 @@ def send_message(sock, message):
 # Update handle_incoming_data function to ensure proper message processing
 
 def handle_incoming_data(sock, client_address):
-    """Handle incoming data from a connected client with improved logging"""
+    """Handle incoming data from a connected client with improved error handling"""
     global running
     
     if message_callback:
@@ -131,7 +131,7 @@ def handle_incoming_data(sock, client_address):
                     decrypted_data = decrypt_data(encrypted_data)
                     message = decrypted_data.decode('utf-8')
                     
-                    # Process the received message - ALWAYS use "message" type for actual data packets
+                    # Process the received message
                     if message_callback:
                         # For certain system messages, don't count as received data packets
                         if message == "ping" or message == "keep-alive":
@@ -143,6 +143,16 @@ def handle_incoming_data(sock, client_address):
                 except Exception as e:
                     if message_callback:
                         message_callback(f"Error decrypting message: {str(e)}", "error")
+                        # Try to extract key information
+                        try:
+                            key_hex = load_key().hex()
+                            key_info = f"Key first/last 8 chars: {key_hex[:8]}...{key_hex[-8:]}"
+                            message_callback(f"Using key: {key_info}", "info")
+                        except:
+                            message_callback("Could not get key info", "error")
+                        
+                        # Log the packet info even when decryption fails
+                        message_callback(f"DECRYPTION_FAILED_PACKET_{bytes_received}", "message")
                 
             except socket.timeout:
                 # Just a timeout, continue the loop

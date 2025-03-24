@@ -15,23 +15,51 @@ def generate_key(local=False):
     return key
 
 def load_key(local=False):
-    """Load the encryption key"""
+    """Load the encryption key with improved validation"""
     try:
         path = DEFAULT_KEY_PATH if local else os.path.expanduser("~/.vpn_key")
+        
         with open(path, 'rb') as f:
             key_data = f.read()
-            
-        # Check if it's a hex string or binary
-        if len(key_data) == 64:  # Hex string would be 64 chars for 32 bytes
+        
+        # Check key format and handle different cases
+        if len(key_data) == 64:  # Probably hex string (64 chars = 32 bytes in hex)
             try:
-                # Try to decode as hex string
-                return bytes.fromhex(key_data.decode('utf-8'))
+                # Try to decode as UTF-8 string and convert from hex
+                key_hex = key_data.decode('utf-8').strip()
+                return bytes.fromhex(key_hex)
+            except:
+                # If that fails, might be binary data that happens to be 64 bytes
+                pass
+                
+        if len(key_data) == 32:
+            # Perfect - 32 bytes binary key
+            return key_data
+            
+        # If we got here, key is not 32 bytes or 64 hex chars
+        if len(key_data) > 0:
+            # Try to extract key from potentially corrupted file
+            try:
+                # Look for hex encoding
+                key_hex = ''.join(chr(b) for b in key_data if chr(b).lower() in '0123456789abcdef')
+                if len(key_hex) >= 64:
+                    # We found at least 64 hex chars
+                    return bytes.fromhex(key_hex[:64])
             except:
                 pass
                 
-        return key_data
+            # If all else fails and key is wrong size, hash it to get correct size
+            if len(key_data) != 32:
+                print(f"WARNING: Key was wrong size ({len(key_data)} bytes), using hash to normalize")
+                return hashlib.sha256(key_data).digest()
+                
+        # If empty or invalid key, generate a new one
+        print("No valid key found, generating new key")
+        return generate_key(local)
+        
     except FileNotFoundError:
         # Generate a new key if none exists
+        print("Key file not found, generating new key")
         return generate_key(local)
 
 def save_key(key_data, local=False):

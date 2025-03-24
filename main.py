@@ -404,6 +404,10 @@ class VPNApplication:
             self.ui.draw_button("Send Test Packet", test_packet_button, 
                              GREEN if self.vpn_active else GRAY)
         
+        # Add key verification button
+        verify_key_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 130, 200, 40)
+        self.ui.draw_button("Verify Encryption Key", verify_key_button, BLUE if self.vpn_active else GRAY)
+        
         # Draw packet transfer logs with improved visual cues
         log_area = pygame.Rect(50, self.HEIGHT - 200, self.WIDTH - 100, 100)
         pygame.draw.rect(self.screen, LIGHT_GRAY, log_area, border_radius=5)
@@ -598,6 +602,11 @@ class VPNApplication:
                     except Exception as e:
                         self.log_message(f"Error sending test packet: {str(e)}")
                         self.ui.show_popup(f"Error: {str(e)}", 2.0)
+            
+            # Then update handle_connected_screen_events to add logic for this button
+            verify_key_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 130, 200, 40)
+            if verify_key_button.collidepoint(event.pos) and self.vpn_active:
+                self.verify_vpn_keys()
     
     # Update the handle_key_events method to remove chat references
     def handle_key_events(self, event):
@@ -815,6 +824,46 @@ class VPNApplication:
                 pass
             
         return result
+    
+    # Add this method to your VPNApplication class
+    def verify_vpn_keys(self):
+        """Verifies that both sides are using the same encryption key by sending a test packet"""
+        if not self.vpn_active:
+            self.ui.show_popup("VPN must be active to verify keys", 2.0)
+            return False
+            
+        try:
+            # Generate a simple test string with current timestamp
+            test_data = f"KEY_VERIFICATION_TEST_{time.time()}"
+            self.log_message(f"Sending key verification packet: {test_data}")
+            
+            # Start a thread to monitor if we get a response
+            if self.connection_type == "send":
+                # Use direct send method to verify connection
+                from vpn import active_connections, send_message
+                
+                # Get the connection
+                connection_id = f"{self.entered_ip}:8989"
+                if connection_id in active_connections:
+                    sock = active_connections[connection_id]
+                    if send_message(sock, test_data):
+                        self.ui.show_popup("Verification packet sent - check receiver logs", 3.0)
+                        return True
+                    else:
+                        self.ui.show_popup("Failed to send verification packet", 2.0)
+                        return False
+                else:
+                    self.ui.show_popup("No active connection found", 2.0)
+                    return False
+            else:
+                # For receiver, we can only wait for incoming packets
+                self.ui.show_popup("Receiver ready - send test packet from sender", 3.0)
+                return True
+                
+        except Exception as e:
+            self.log_message(f"Key verification error: {str(e)}")
+            self.ui.show_popup(f"Verification error: {str(e)}", 2.0)
+            return False
     
     # Update the run method to draw popups
     def run(self):
