@@ -71,6 +71,10 @@ class VPNApplication:
         
         # Set message callback
         set_message_callback(self.handle_vpn_message)
+        
+        # Add refresh timer for UI updates
+        self.last_ui_refresh = 0
+        self.ui_refresh_interval = 0.5  # seconds
     
     # Update the setup_buttons method
     def setup_buttons(self):
@@ -101,25 +105,60 @@ class VPNApplication:
     # Update handle_vpn_message to strictly limit log history
     def handle_vpn_message(self, message, msg_type="info"):
         """Handle messages from the VPN module with improved log management"""
+        current_time = time.strftime("%H:%M:%S")
+        
         if msg_type == "message":
-            # Track as packet transfer
+            # Track as packet received
             self.packets_received += 1
             self.bytes_transferred += len(message)
-            self.transfer_logs.append(f"Packet received: {len(message)} bytes")
-            # Strictly limit log history
-            while len(self.transfer_logs) > 10:  # Keep only 10 most recent logs
+            
+            # More detailed log for easier debugging
+            if "TEST_PACKET" in message or "test packet" in message.lower():
+                # Make test packets more visible in logs
+                log_entry = f"[{current_time}] 📦 Test packet received: {len(message)} bytes"
+            else:
+                log_entry = f"[{current_time}] 📥 Packet received: {len(message)} bytes"
+            
+            # Add to transfer logs
+            self.transfer_logs.append(log_entry)
+            
+            # Print to console for easier debugging
+            print(f"RECEIVED: {log_entry}")
+            
+            # Limit log history
+            while len(self.transfer_logs) > 10:
                 self.transfer_logs.pop(0)
+                
         elif msg_type == "packet_sent":
+            # Track as packet sent
             self.packets_sent += 1
             self.bytes_transferred += len(message)
-            self.transfer_logs.append(f"Packet sent: {len(message)} bytes")
-            # Strictly limit log history
-            while len(self.transfer_logs) > 10:  # Keep only 10 most recent logs
+            
+            # More detailed log
+            if "TEST_PACKET" in message or "test packet" in message.lower():
+                log_entry = f"[{current_time}] 📤 Test packet sent: {len(message)} bytes"
+            else:
+                log_entry = f"[{current_time}] 📤 Packet sent: {len(message)} bytes"
+            
+            # Add to transfer logs
+            self.transfer_logs.append(log_entry)
+            
+            # Print to console for easier debugging
+            print(f"SENT: {log_entry}")
+            
+            # Limit log history
+            while len(self.transfer_logs) > 10:
                 self.transfer_logs.pop(0)
+                
         else:
+            # Regular info/error logs
             self.log_messages.append(message)
-            # Strictly limit general log history as well
-            while len(self.log_messages) > 15:  # Keep only 15 most recent logs
+            
+            # Print to console for easier debugging
+            print(f"LOG: {message}")
+            
+            # Limit general log history
+            while len(self.log_messages) > 15:
                 self.log_messages.pop(0)
     
     # Update the start_vpn_thread method to remove the auto-message that might cause issues
@@ -289,20 +328,32 @@ class VPNApplication:
         disconnect_button = pygame.Rect(20, 20, 150, 40)
         self.ui.draw_button("Disconnect", disconnect_button, RED)
         
-        # Draw VPN toggle circle
-        circle_center = (150, 200)
+        # Draw VPN toggle circle - SHIFTED RIGHT FOR BETTER TEXT LAYOUT
+        circle_center = (200, 200)  # Moved from 150 to 200 for more space
         circle_color = GREEN if self.vpn_active else RED
         self.ui.draw_circle_button(circle_center, 50, circle_color)
         
+        # Status text
         status_text = "VPN ACTIVE" if self.vpn_active else "VPN INACTIVE"
         status_surf = self.fonts['normal'].render(status_text, True, BLACK)
         self.screen.blit(status_surf, (circle_center[0] - status_surf.get_width()//2, circle_center[1] + 60))
         
-        # Show connected IP
-        ip_text = f"Connected to: {self.entered_ip}" if self.connection_type == "send" else "Listening for connections"
-        ip_surf = self.fonts['normal'].render(ip_text, True, BLACK)
-        self.screen.blit(ip_surf, (circle_center[0] - ip_surf.get_width()//2, circle_center[1] + 90))
+        # Show connected IP with adjusted positioning
+        if self.connection_type == "send":
+            ip_text = f"Connected to: {self.entered_ip}"
+        else:
+            ip_text = "Listening for connections"
         
+        ip_surf = self.fonts['normal'].render(ip_text, True, BLACK)
+        
+        # Make sure the text is fully visible within screen bounds
+        text_x = circle_center[0] - ip_surf.get_width()//2
+        # Ensure text doesn't go beyond left margin
+        if text_x < 30:
+            text_x = 30
+        self.screen.blit(ip_surf, (text_x, circle_center[1] + 90))
+        
+        # Rest of the method remains unchanged
         # Update connection time
         if self.vpn_active:
             if self.connection_start_time == 0:
@@ -360,14 +411,20 @@ class VPNApplication:
         log_title = self.fonts['normal'].render("Packet Transfer Log", True, BLACK)
         self.screen.blit(log_title, (log_area.x + 10, log_area.y + 5))
         
-        # Add indicator if there are more logs than shown
+        # Add indicator if there are more logs than shown and show count
         if len(self.transfer_logs) > 5:
             more_logs_text = f"(+{len(self.transfer_logs) - 5} more logs)"
             more_logs_surf = self.fonts['small'].render(more_logs_text, True, DARK_GRAY)
             self.screen.blit(more_logs_surf, (log_area.x + log_area.width - more_logs_surf.get_width() - 15, log_area.y + 10))
         
+        # Display the most recent logs - use reversed to have newest at the top
         y_offset = log_area.y + 40
-        for log in self.transfer_logs[-5:]:  # Show only last 5 logs
+        # Make a copy and select the last 5 entries to display (most recent)
+        display_logs = list(self.transfer_logs[-5:])
+        # Ensure these are shown in reverse order (newest at the top) - optional
+        # display_logs.reverse()  # Uncomment if you want newest at top
+        
+        for log in display_logs:
             log_surf = self.fonts['small'].render(log, True, DARK_GRAY)
             self.screen.blit(log_surf, (log_area.x + 15, y_offset))
             y_offset += 20
@@ -763,6 +820,7 @@ class VPNApplication:
     def run(self):
         """Main application loop"""
         running = True
+        clock = pygame.time.Clock()
         
         while running:
             self.screen.fill(WHITE)
@@ -783,8 +841,15 @@ class VPNApplication:
             # Draw any active popup notification
             self.ui.draw_popup()
             
+            # Regular UI update
             pygame.display.flip()
             
+            # Force refresh the screen every interval to ensure logs are updated
+            current_time = time.time()
+            if current_time - self.last_ui_refresh >= self.ui_refresh_interval:
+                pygame.display.update()
+                self.last_ui_refresh = current_time
+                
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
@@ -799,6 +864,9 @@ class VPNApplication:
                 
                 elif event.type == pygame.KEYDOWN:
                     self.handle_key_events(event)
+                    
+            # Limit frame rate to save CPU
+            clock.tick(30)
         
         pygame.quit()
         stop_vpn()

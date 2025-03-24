@@ -84,8 +84,10 @@ def send_message(sock, message):
             message_callback(f"Error sending message: {str(e)}", "error")
         return False
 
+# Update handle_incoming_data function to ensure proper message processing
+
 def handle_incoming_data(sock, client_address):
-    """Handle incoming data from a connected client"""
+    """Handle incoming data from a connected client with improved logging"""
     global running
     
     if message_callback:
@@ -129,9 +131,15 @@ def handle_incoming_data(sock, client_address):
                     decrypted_data = decrypt_data(encrypted_data)
                     message = decrypted_data.decode('utf-8')
                     
-                    # Process the received message
+                    # Process the received message - ALWAYS use "message" type for actual data packets
                     if message_callback:
-                        message_callback(message, "message")
+                        # For certain system messages, don't count as received data packets
+                        if message == "ping" or message == "keep-alive":
+                            message_callback(f"Received keepalive ping", "info")
+                        else:
+                            # This is the critical line to make sure packets appear in the transfer log
+                            message_callback(message, "message")
+                            
                 except Exception as e:
                     if message_callback:
                         message_callback(f"Error decrypting message: {str(e)}", "error")
