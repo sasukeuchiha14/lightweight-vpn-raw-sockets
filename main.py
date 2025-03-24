@@ -20,7 +20,7 @@ class VPNApplication:
         # Screen settings
         self.WIDTH, self.HEIGHT = 900, 600
         self.screen = pygame.display.set_mode((self.WIDTH, self.HEIGHT))
-        pygame.display.set_caption("Lightweight VPN")
+        pygame.display.setCaption("Lightweight VPN")
         
         # Fonts
         self.fonts = {
@@ -96,35 +96,46 @@ class VPNApplication:
         """Add a message to the log"""
         self.log_messages.append(message)
     
+    # Update handle_vpn_message to strictly limit log history
     def handle_vpn_message(self, message, msg_type="info"):
-        """Handle messages from the VPN module"""
+        """Handle messages from the VPN module with improved log management"""
         if msg_type == "message":
             # Track as packet transfer
             self.packets_received += 1
             self.bytes_transferred += len(message)
             self.transfer_logs.append(f"Packet received: {len(message)} bytes")
-            # Keep only the last 20 transfer logs
-            if len(self.transfer_logs) > 20:
+            # Strictly limit log history
+            while len(self.transfer_logs) > 10:  # Keep only 10 most recent logs
                 self.transfer_logs.pop(0)
         elif msg_type == "packet_sent":
             self.packets_sent += 1
             self.bytes_transferred += len(message)
             self.transfer_logs.append(f"Packet sent: {len(message)} bytes")
-            # Keep only the last 20 transfer logs
-            if len(self.transfer_logs) > 20:
+            # Strictly limit log history
+            while len(self.transfer_logs) > 10:  # Keep only 10 most recent logs
                 self.transfer_logs.pop(0)
         else:
             self.log_messages.append(message)
+            # Strictly limit general log history as well
+            while len(self.log_messages) > 15:  # Keep only 15 most recent logs
+                self.log_messages.pop(0)
     
-    # Fix the start_vpn_thread method to be more robust
+    # Update the start_vpn_thread method to remove the auto-message that might cause issues
     def start_vpn_thread(self):
-        """Start VPN in a separate thread"""
+        """Start VPN in a separate thread with improved stability"""
         try:
             # First make sure any previous VPN is stopped
             stop_vpn()
             
             # Short delay to ensure cleanup
             time.sleep(0.5)
+            
+            # Reset connection statistics
+            self.packets_sent = 0
+            self.packets_received = 0
+            self.bytes_transferred = 0
+            self.connection_time = 0
+            self.connection_start_time = 0
             
             # Start new VPN connection
             if self.connection_type == "send":
@@ -135,26 +146,46 @@ class VPNApplication:
                 threading.Thread(target=self.vpn_receiver_wrapper, daemon=True).start()
             
             self.vpn_active = True
-            
-            # Queue a connection successful message after a brief delay
-            def send_initial_packet():
-                time.sleep(1)
-                if self.vpn_active:
-                    queue_message("VPN connection established")
-            
-            threading.Thread(target=send_initial_packet, daemon=True).start()
+            self.transfer_logs.append("VPN connection initialized")
             
         except Exception as e:
             self.log_message(f"Error starting VPN: {str(e)}")
             self.vpn_active = False
     
+    # Improve VPN sender wrapper to prevent disconnection
     def vpn_sender_wrapper(self, ip):
-        """Wrapper for vpn_sender with error handling"""
+        """Wrapper for vpn_sender with improved error handling and reconnection"""
         try:
+            # Log connection attempt
+            self.log_message(f"Connecting to VPN target: {ip}")
+            
+            # Run vpn_sender and handle any errors
             vpn_sender(ip)
+            
+            # If we reach here normally, the connection ended gracefully
+            self.log_message("VPN sender connection ended")
+        except ConnectionRefusedError:
+            self.log_message(f"Connection refused by {ip}. Is the receiver running?")
+            self.vpn_active = False
+        except ConnectionResetError:
+            self.log_message("Connection reset by peer. Remote host disconnected.")
+            self.vpn_active = False
+        except socket.timeout:
+            self.log_message("Connection timed out")
+            self.vpn_active = False
         except Exception as e:
             self.log_message(f"VPN sender error: {str(e)}")
-            self.vpn_active = False
+            # Don't set vpn_active to False immediately to allow for retries
+            
+            # Try to recover if still active
+            if self.vpn_active:
+                self.log_message("Attempting to reconnect...")
+                time.sleep(2)  # Wait before reconnecting
+                try:
+                    vpn_sender(ip)
+                except Exception as e2:
+                    self.log_message(f"Reconnection failed: {str(e2)}")
+                    self.vpn_active = False
     
     def vpn_receiver_wrapper(self):
         """Wrapper for vpn_receiver with error handling"""
@@ -231,7 +262,7 @@ class VPNApplication:
             connect_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 100, 200, 50)
             self.ui.draw_button("Connect", connect_button, GREEN)
     
-    # Update the draw_connected_screen method
+    # Update the draw_connected_screen method to only show test packet button in send mode
     def draw_connected_screen(self):
         """Draw the connected VPN screen"""
         # Wider disconnect button
@@ -295,17 +326,24 @@ class VPNApplication:
             self.screen.blit(stat_surf, (stats_area.x + 20, y_offset))
             y_offset += 30
         
-        # Add test packet button
-        test_packet_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 80, 200, 50)
-        self.ui.draw_button("Send Test Packet", test_packet_button, 
-                         GREEN if self.vpn_active else GRAY)
+        # Add test packet button ONLY in send mode
+        if self.connection_type == "send":
+            test_packet_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 80, 200, 50)
+            self.ui.draw_button("Send Test Packet", test_packet_button, 
+                             GREEN if self.vpn_active else GRAY)
         
-        # Draw packet transfer logs
+        # Draw packet transfer logs with improved visual cues
         log_area = pygame.Rect(50, self.HEIGHT - 200, self.WIDTH - 100, 100)
         pygame.draw.rect(self.screen, LIGHT_GRAY, log_area, border_radius=5)
         
         log_title = self.fonts['normal'].render("Packet Transfer Log", True, BLACK)
         self.screen.blit(log_title, (log_area.x + 10, log_area.y + 5))
+        
+        # Add indicator if there are more logs than shown
+        if len(self.transfer_logs) > 5:
+            more_logs_text = f"(+{len(self.transfer_logs) - 5} more logs)"
+            more_logs_surf = self.fonts['small'].render(more_logs_text, True, DARK_GRAY)
+            self.screen.blit(more_logs_surf, (log_area.x + log_area.width - more_logs_surf.get_width() - 15, log_area.y + 10))
         
         y_offset = log_area.y + 40
         for log in self.transfer_logs[-5:]:  # Show only last 5 logs
@@ -400,6 +438,7 @@ class VPNApplication:
                         else:
                             self.ui.show_popup("No valid key found in clipboard")
     
+    # Update the handle_connected_screen_events method to only process test packet in send mode
     def handle_connected_screen_events(self, event):
         """Handle events for the connected screen"""
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -429,16 +468,17 @@ class VPNApplication:
                 except Exception as e:
                     self.log_message(f"Error toggling VPN: {str(e)}")
             
-            # Add a new Test Packet button
-            test_packet_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 80, 200, 50)
-            if test_packet_button.collidepoint(event.pos) and self.vpn_active:
-                try:
-                    # Send a test packet
-                    test_data = f"Test packet: {time.time()}"
-                    queue_message(test_data)
-                    self.log_message("Test packet queued for sending")
-                except Exception as e:
-                    self.log_message(f"Error sending test packet: {str(e)}")
+            # Test packet button - ONLY check in send mode
+            if self.connection_type == "send":
+                test_packet_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 80, 200, 50)
+                if test_packet_button.collidepoint(event.pos) and self.vpn_active:
+                    try:
+                        # Send a test packet
+                        test_data = f"Test packet: {time.time()}"
+                        queue_message(test_data)
+                        self.log_message("Test packet queued for sending")
+                    except Exception as e:
+                        self.log_message(f"Error sending test packet: {str(e)}")
     
     # Update the handle_key_events method to remove chat references
     def handle_key_events(self, event):
