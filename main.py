@@ -219,6 +219,7 @@ class VPNApplication:
             self.ui.draw_button("Send Mode", self.send_button)
             self.ui.draw_button("Receive Mode", self.receive_button)
     
+    # Add a port test button in your draw_config_screen method
     def draw_config_screen(self):
         """Draw the VPN configuration screen"""
         self.ui.draw_button("Back", self.back_button)
@@ -262,6 +263,11 @@ class VPNApplication:
             # Connect button
             connect_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 100, 200, 50)
             self.ui.draw_button("Connect", connect_button, GREEN)
+        
+        # Add a port test button if in send mode
+        if self.connection_type == "send":
+            port_test_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 50, 200, 40)
+            self.ui.draw_button("Test Connection", port_test_button, BLUE)
     
     # Update the draw_connected_screen method to only show test packet button in send mode
     def draw_connected_screen(self):
@@ -318,7 +324,8 @@ class VPNApplication:
             f"Connection time: {time_str}",
             f"Packets sent: {self.packets_sent}",
             f"Packets received: {self.packets_received}",
-            f"Data transferred: {bytes_str}"
+            f"Data transferred: {bytes_str}",
+            f"VPN Port: {8989}"  # Show the VPN port being used
         ]
         
         y_offset = stats_area.y + 50
@@ -368,6 +375,7 @@ class VPNApplication:
                     self.connection_type = "receive"
                     self.current_state = self.STATE_CONFIG
     
+    # Update handle_config_screen_events to add the port test
     def handle_config_screen_events(self, event):
         """Handle events for the configuration screen"""
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -438,6 +446,12 @@ class VPNApplication:
                             self.ui.show_popup("Key pasted from clipboard")
                         else:
                             self.ui.show_popup("No valid key found in clipboard")
+            
+            # Add port test button handler
+            if self.connection_type == "send":
+                port_test_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 50, 200, 40)
+                if port_test_button.collidepoint(event.pos):
+                    self.test_port_connection(self.entered_ip, 8989)  # Test VPN port
     
     # Update the handle_connected_screen_events method to only process test packet in send mode
     def handle_connected_screen_events(self, event):
@@ -575,6 +589,26 @@ class VPNApplication:
             except:
                 self.log_message("Unable to access clipboard")
                 return ""
+    
+    # Add this function to your VPNApplication class
+    def test_port_connection(self, ip, port):
+        """Test if a port is open on the target IP"""
+        try:
+            self.log_message(f"Testing connection to {ip}:{port}...")
+            test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_socket.settimeout(5)
+            result = test_socket.connect_ex((ip, port))
+            test_socket.close()
+            
+            if result == 0:
+                self.log_message(f"✅ Port {port} is OPEN on {ip}")
+                return True
+            else:
+                self.log_message(f"❌ Port {port} is CLOSED on {ip} (Error code: {result})")
+                return False
+        except Exception as e:
+            self.log_message(f"❌ Error testing port: {str(e)}")
+            return False
     
     # Update the run method to draw popups
     def run(self):
