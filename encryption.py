@@ -14,35 +14,51 @@ def generate_key(local=False):
         f.write(key)
     return key
 
-# Replace the existing load_key function with this version
+# Replace the load_key function in encryption.py with this cross-platform version
 def load_key(local=False, direct_key=None):
-    """Load the encryption key with strict cross-platform compatibility"""
-    # If direct key string is provided, use it instead of loading from file
+    """Load the encryption key with guaranteed cross-platform compatibility"""
+    # If direct key string is provided, use it directly
     if direct_key:
-        return normalize_key_string(direct_key)
-        
+        # Ensure it's a clean hex string without any platform-specific characters
+        clean_key = ''.join(c for c in direct_key if c.lower() in '0123456789abcdef')
+        if len(clean_key) == 64:
+            # Convert directly to bytes (platform-independent)
+            return bytes.fromhex(clean_key)
+        else:
+            raise ValueError(f"Invalid direct key length: {len(clean_key)}, expected 64 hex chars")
+    
     try:
         path = DEFAULT_KEY_PATH if local else os.path.expanduser("~/.vpn_key")
         
-        # Read the key file
         with open(path, 'rb') as f:
-            file_content = f.read()
+            file_data = f.read()
         
-        # First, try to interpret as binary (32 bytes)
-        if len(file_content) == 32:
-            return file_content
+        # Try to interpret as binary key (32 bytes)
+        if len(file_data) == 32:
+            return file_data
             
-        # Next, try to interpret as hex string
+        # Try to interpret as hex string
+        # Convert to string and strip any whitespace/newlines that might differ by platform
         try:
-            # Convert to string and clean
-            text_content = file_content.decode('utf-8', errors='ignore').strip()
-            return normalize_key_string(text_content)
-        except Exception as e:
-            print(f"Error normalizing key: {e}")
+            # Decode assuming it's text data
+            text_content = file_data.decode('utf-8', errors='ignore').strip()
+            # Extract only hex characters
+            clean_key = ''.join(c for c in text_content if c.lower() in '0123456789abcdef')
             
-        # If we get here, try a last resort approach
-        print("Using hash-based key normalization as fallback")
-        return hashlib.sha256(file_content).digest()
+            if len(clean_key) >= 64:
+                # Take exactly the first 64 hex chars (32 bytes)
+                return bytes.fromhex(clean_key[:64])
+        except Exception as e:
+            print(f"Error interpreting key as hex: {e}")
+        
+        # If we still don't have a valid key, but have some data, hash it
+        if file_data:
+            print("Warning: Using hash-based normalization for invalid key format")
+            return hashlib.sha256(file_data).digest()
+            
+        # If no valid key found, generate a new one
+        print("No valid key data found, generating new key")
+        return generate_key(local)
         
     except FileNotFoundError:
         # Generate a new key if none exists

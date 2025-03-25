@@ -7,6 +7,7 @@ import re
 import time
 import socket
 import subprocess
+import hashlib
 
 # Import our modules
 from ui_components import UIComponents, WHITE, BLACK, GREEN, BLUE, RED, DARK_GREEN, LIGHT_GRAY, GRAY, DARK_GRAY
@@ -192,6 +193,19 @@ class VPNApplication:
                 self.ui.show_popup("Error loading encryption key", 3.0)
                 return
                 
+            # Add this to the start_vpn_thread method right after loading the key:
+            from encryption import normalize_key_string
+            self.log_message("Enforcing consistent key format...")
+            try:
+                # This will handle the key in a platform-independent way
+                key_text = key.hex()
+                # Get a deterministic fingerprint that will be identical across systems
+                fixed_fingerprint = hashlib.sha256(key).hexdigest()[:16]
+                self.log_message(f"Key verification hash: {fixed_fingerprint}")
+                self.ui.show_popup(f"Key verification hash: {fixed_fingerprint}", 3.0)
+            except Exception as e:
+                self.log_message(f"Key consistency check failed: {str(e)}")
+                
             # First make sure any previous VPN is stopped
             stop_vpn()
             
@@ -343,10 +357,6 @@ class VPNApplication:
             # Connect button
             connect_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 100, 200, 50)
             self.ui.draw_button("Connect", connect_button, GREEN)
-        
-            # Add sync key button
-            sync_key_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 180, 200, 40)
-            self.ui.draw_button("Sync Key Format", sync_key_button, BLUE)
         
         # Add a port test button for both sender and receiver
         port_test_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 50, 200, 40)
@@ -542,8 +552,8 @@ class VPNApplication:
                 if connect_button.collidepoint(event.pos):
                     if self.active_input == "key":
                         previous_status = self.using_existing_key
-                        self.key_text, self.using_existing_key = self.key_manager.handle_key_management(
-                            "manual", self.key_text, generate_key, load_key, save_key)
+                        # Use the consistent key function instead of key_manager
+                        self.key_text, self.using_existing_key = self.ensure_consistent_key(self.key_text)
                         if self.using_existing_key and not previous_status:
                             self.ui.show_popup("Key saved successfully")
                     if self.using_existing_key:  # Only connect if we have a valid key
@@ -573,12 +583,6 @@ class VPNApplication:
                             self.ui.show_popup("Key pasted from clipboard")
                         else:
                             self.ui.show_popup("No valid key found in clipboard")
-            
-            # Add the sync key button logic
-            sync_key_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 180, 200, 40)
-            if sync_key_button.collidepoint(event.pos) and (self.using_existing_key or self.active_input == "key"):
-                # Use the current key text to force sync
-                self.force_sync_key(self.key_text)
     
     # Update the handle_connected_screen_events method to fix test packet sending
     def handle_connected_screen_events(self, event):
@@ -677,7 +681,7 @@ class VPNApplication:
             elif ctrl_pressed and event.key == pygame.K_v:
                 # Paste IP from clipboard
                 clipboard_text = self.get_clipboard_text()
-                if clipboard_text and self.validate_ip(clipboard_text):
+                if (clipboard_text and self.validate_ip(clipboard_text)):
                     self.entered_ip = clipboard_text
                     self.log_message(f"Pasted IP: {self.entered_ip}")
                 else:
@@ -812,7 +816,33 @@ class VPNApplication:
             self.log_message(f"❌ Ping error: {str(e)}")
             return False
     
-    # Add this method to test listening port for receiver mode
+    # Add this method to the VPNApplication class
+    def ensure_consistent_key(self, key_text):
+        """Ensure consistent key representation across platforms"""
+        try:
+            # Clean the key to ONLY include hex characters
+            clean_key = ''.join(c for c in key_text if c.lower() in '0123456789abcdef')
+            
+            if len(clean_key) < 64:
+                self.ui.show_popup("Key too short, needs 64 hex characters", 2.0)
+                return key_text, False
+                
+            # Take exactly 64 characters to ensure consistency
+            normalized_key = clean_key[:64]
+            
+            # Save this exact key format
+            from encryption import save_key
+            key_bytes = bytes.fromhex(normalized_key)
+            save_key(key_bytes, local=True)
+            
+            # Return the normalized key
+            return normalized_key, True
+        except Exception as e:
+            self.log_message(f"Error normalizing key: {str(e)}")
+            self.ui.show_popup("Invalid key format", 2.0)
+            return key_text, False
+    
+    # Add a method to test listening port for receiver mode
     def test_listening_port(self, port):
         """Test if the listening port is available and working"""
         self.log_message(f"Testing if port {port} is available for listening...")
@@ -948,38 +978,6 @@ class VPNApplication:
             self.log_message(line)
         
         self.ui.show_popup("See log for key mismatch help", 3.0)
-    
-    # Add the force_sync_key method
-    def force_sync_key(self, key_hex=None):
-        """Force both sides to use the exact same key bytes"""
-        if not key_hex:
-            # Use the current key_text if available
-            if self.key_text and len(self.key_text) >= 64:
-                key_hex = self.key_text
-            else:
-                self.ui.show_popup("No valid key found to sync", 2.0)
-                return False
-        
-        try:
-            # Import the normalize function
-            from encryption import normalize_key_string, save_key
-            
-            # Convert the hex string to exact bytes using our strict function
-            key_bytes = normalize_key_string(key_hex)
-            
-            # Save these exact bytes
-            save_key(key_bytes, local=True)
-            
-            # Display the fingerprint from these bytes
-            key_fingerprint = f"{key_bytes.hex()[:8]}...{key_bytes.hex()[-8:]}"
-            self.log_message(f"Key synchronized with fingerprint: {key_fingerprint}")
-            self.ui.show_popup(f"Key synchronized: {key_fingerprint}", 3.0)
-            
-            return True
-        except Exception as e:
-            self.log_message(f"Error syncing key: {str(e)}")
-            self.ui.show_popup("Error syncing key", 2.0)
-            return False
     
     # Update the run method to draw popups
     def run(self):
