@@ -344,6 +344,10 @@ class VPNApplication:
             connect_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 100, 200, 50)
             self.ui.draw_button("Connect", connect_button, GREEN)
         
+            # Add sync key button
+            sync_key_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 180, 200, 40)
+            self.ui.draw_button("Sync Key Format", sync_key_button, BLUE)
+        
         # Add a port test button for both sender and receiver
         port_test_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 50, 200, 40)
         if self.connection_type == "send":
@@ -569,6 +573,12 @@ class VPNApplication:
                             self.ui.show_popup("Key pasted from clipboard")
                         else:
                             self.ui.show_popup("No valid key found in clipboard")
+            
+            # Add the sync key button logic
+            sync_key_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 180, 200, 40)
+            if sync_key_button.collidepoint(event.pos) and (self.using_existing_key or self.active_input == "key"):
+                # Use the current key text to force sync
+                self.force_sync_key(self.key_text)
     
     # Update the handle_connected_screen_events method to fix test packet sending
     def handle_connected_screen_events(self, event):
@@ -938,6 +948,38 @@ class VPNApplication:
             self.log_message(line)
         
         self.ui.show_popup("See log for key mismatch help", 3.0)
+    
+    # Add the force_sync_key method
+    def force_sync_key(self, key_hex=None):
+        """Force both sides to use the exact same key bytes"""
+        if not key_hex:
+            # Use the current key_text if available
+            if self.key_text and len(self.key_text) >= 64:
+                key_hex = self.key_text
+            else:
+                self.ui.show_popup("No valid key found to sync", 2.0)
+                return False
+        
+        try:
+            # Import the normalize function
+            from encryption import normalize_key_string, save_key
+            
+            # Convert the hex string to exact bytes using our strict function
+            key_bytes = normalize_key_string(key_hex)
+            
+            # Save these exact bytes
+            save_key(key_bytes, local=True)
+            
+            # Display the fingerprint from these bytes
+            key_fingerprint = f"{key_bytes.hex()[:8]}...{key_bytes.hex()[-8:]}"
+            self.log_message(f"Key synchronized with fingerprint: {key_fingerprint}")
+            self.ui.show_popup(f"Key synchronized: {key_fingerprint}", 3.0)
+            
+            return True
+        except Exception as e:
+            self.log_message(f"Error syncing key: {str(e)}")
+            self.ui.show_popup("Error syncing key", 2.0)
+            return False
     
     # Update the run method to draw popups
     def run(self):

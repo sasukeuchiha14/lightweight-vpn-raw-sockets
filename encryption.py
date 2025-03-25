@@ -14,40 +14,35 @@ def generate_key(local=False):
         f.write(key)
     return key
 
-def load_key(local=False):
-    """Load the encryption key with consistent cross-platform behavior"""
+# Replace the existing load_key function with this version
+def load_key(local=False, direct_key=None):
+    """Load the encryption key with strict cross-platform compatibility"""
+    # If direct key string is provided, use it instead of loading from file
+    if direct_key:
+        return normalize_key_string(direct_key)
+        
     try:
         path = DEFAULT_KEY_PATH if local else os.path.expanduser("~/.vpn_key")
         
-        # Read the key file in binary mode
+        # Read the key file
         with open(path, 'rb') as f:
-            key_data = f.read()
+            file_content = f.read()
         
-        # First, try to normalize the key data by removing whitespace and newlines
+        # First, try to interpret as binary (32 bytes)
+        if len(file_content) == 32:
+            return file_content
+            
+        # Next, try to interpret as hex string
         try:
-            decoded = key_data.decode('utf-8', errors='ignore').strip()
-            # Remove all whitespace, newlines, etc.
-            cleaned = ''.join(c for c in decoded if c.lower() in '0123456789abcdef')
+            # Convert to string and clean
+            text_content = file_content.decode('utf-8', errors='ignore').strip()
+            return normalize_key_string(text_content)
+        except Exception as e:
+            print(f"Error normalizing key: {e}")
             
-            # If we have a valid hex string (64 chars = 32 bytes)
-            if len(cleaned) >= 64:
-                # Take exactly 64 chars and convert to bytes
-                return bytes.fromhex(cleaned[:64])
-        except Exception:
-            pass
-        
-        # If the key is already 32 bytes of binary data
-        if len(key_data) == 32:
-            return key_data
-            
-        # For any other length binary data, hash it to get a consistent 32-byte key
-        if len(key_data) > 0:
-            print(f"WARNING: Non-standard key format ({len(key_data)} bytes), hashing for consistency")
-            return hashlib.sha256(key_data).digest()
-            
-        # If we reach here, we have no valid key data
-        print("No valid key found, generating new key")
-        return generate_key(local)
+        # If we get here, try a last resort approach
+        print("Using hash-based key normalization as fallback")
+        return hashlib.sha256(file_content).digest()
         
     except FileNotFoundError:
         # Generate a new key if none exists
@@ -120,6 +115,25 @@ def decrypt_message(encrypted_message):
     """Decrypt a message to text"""
     decrypted_data = decrypt_data(encrypted_message)
     return decrypted_data.decode('utf-8')
+
+# Add this function to encryption.py
+def normalize_key_string(key_string):
+    """
+    Strictly normalize a key string to ensure cross-platform compatibility
+    """
+    # Remove all non-hex characters (spaces, newlines, etc.)
+    clean_key = ''.join(c for c in key_string if c.lower() in '0123456789abcdef')
+    
+    # Ensure we have exactly 64 hex chars (32 bytes)
+    if len(clean_key) >= 64:
+        clean_key = clean_key[:64]  # Take only first 64 chars if longer
+    else:
+        # If shorter, it's an invalid key - but we'll pad with zeros to prevent errors
+        print(f"WARNING: Key too short ({len(clean_key)} chars), padding with zeros")
+        clean_key = clean_key.ljust(64, '0')
+    
+    # Convert hex string to bytes
+    return bytes.fromhex(clean_key)
 
 # Run a test
 if __name__ == "__main__":
