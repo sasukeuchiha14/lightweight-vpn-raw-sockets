@@ -15,45 +15,37 @@ def generate_key(local=False):
     return key
 
 def load_key(local=False):
-    """Load the encryption key with improved validation"""
+    """Load the encryption key with consistent cross-platform behavior"""
     try:
         path = DEFAULT_KEY_PATH if local else os.path.expanduser("~/.vpn_key")
         
+        # Read the key file in binary mode
         with open(path, 'rb') as f:
             key_data = f.read()
         
-        # Check key format and handle different cases
-        if len(key_data) == 64:  # Probably hex string (64 chars = 32 bytes in hex)
-            try:
-                # Try to decode as UTF-8 string and convert from hex
-                key_hex = key_data.decode('utf-8').strip()
-                return bytes.fromhex(key_hex)
-            except:
-                # If that fails, might be binary data that happens to be 64 bytes
-                pass
-                
+        # First, try to normalize the key data by removing whitespace and newlines
+        try:
+            decoded = key_data.decode('utf-8', errors='ignore').strip()
+            # Remove all whitespace, newlines, etc.
+            cleaned = ''.join(c for c in decoded if c.lower() in '0123456789abcdef')
+            
+            # If we have a valid hex string (64 chars = 32 bytes)
+            if len(cleaned) >= 64:
+                # Take exactly 64 chars and convert to bytes
+                return bytes.fromhex(cleaned[:64])
+        except Exception:
+            pass
+        
+        # If the key is already 32 bytes of binary data
         if len(key_data) == 32:
-            # Perfect - 32 bytes binary key
             return key_data
             
-        # If we got here, key is not 32 bytes or 64 hex chars
+        # For any other length binary data, hash it to get a consistent 32-byte key
         if len(key_data) > 0:
-            # Try to extract key from potentially corrupted file
-            try:
-                # Look for hex encoding
-                key_hex = ''.join(chr(b) for b in key_data if chr(b).lower() in '0123456789abcdef')
-                if len(key_hex) >= 64:
-                    # We found at least 64 hex chars
-                    return bytes.fromhex(key_hex[:64])
-            except:
-                pass
-                
-            # If all else fails and key is wrong size, hash it to get correct size
-            if len(key_data) != 32:
-                print(f"WARNING: Key was wrong size ({len(key_data)} bytes), using hash to normalize")
-                return hashlib.sha256(key_data).digest()
-                
-        # If empty or invalid key, generate a new one
+            print(f"WARNING: Non-standard key format ({len(key_data)} bytes), hashing for consistency")
+            return hashlib.sha256(key_data).digest()
+            
+        # If we reach here, we have no valid key data
         print("No valid key found, generating new key")
         return generate_key(local)
         
