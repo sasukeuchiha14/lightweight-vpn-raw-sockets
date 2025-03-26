@@ -112,7 +112,9 @@ class UIComponents:
         """Draw popup message if active"""
         if self.popup_message and time.time() - self.popup_timer < self.popup_duration:
             # Create a semi-transparent background
-            popup_width = min(len(self.popup_message) * 10 + 40, 600)
+            # Increase minimum width and calculate based on text length
+            text_width = self.font.size(self.popup_message)[0]
+            popup_width = max(text_width + 60, 300)  # At least 300px wide or text width + padding
             popup_height = 60
             popup_rect = pygame.Rect(
                 self.screen.get_width()//2 - popup_width//2,
