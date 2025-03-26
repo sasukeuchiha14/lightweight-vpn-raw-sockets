@@ -434,15 +434,19 @@ class VPNApplication:
             self.screen.blit(stat_surf, (stats_area.x + 20, y_offset))
             y_offset += 30
         
-        # Add test packet button ONLY in send mode
+        # MODIFIED - Buttons side by side
         if self.connection_type == "send":
-            test_packet_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 80, 200, 50)
-            self.ui.draw_button("Send Test Packet", test_packet_button, 
-                             GREEN if self.vpn_active else GRAY)
-        
-        # Add key verification button
-        verify_key_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 130, 200, 40)
-        self.ui.draw_button("Verify Encryption Key", verify_key_button, BLUE if self.vpn_active else GRAY)
+            # Draw both buttons side by side
+            test_packet_button = pygame.Rect(self.WIDTH//2 - 210, self.HEIGHT - 80, 200, 50)
+            verify_button = pygame.Rect(self.WIDTH//2 + 10, self.HEIGHT - 80, 200, 50)
+            
+            # Draw buttons
+            self.ui.draw_button("Send Test Packet", test_packet_button, GREEN if self.vpn_active else GRAY)
+            self.ui.draw_button("Verify Encryption", verify_button, BLUE if self.vpn_active else GRAY)
+        else:
+            # For receiver, only show verify button centered
+            verify_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 80, 200, 50)
+            self.ui.draw_button("Verify Encryption", verify_button, BLUE if self.vpn_active else GRAY)
         
         # Draw packet transfer logs with improved visual cues
         log_area = pygame.Rect(50, self.HEIGHT - 200, self.WIDTH - 100, 100)
@@ -451,18 +455,15 @@ class VPNApplication:
         log_title = self.fonts['normal'].render("Packet Transfer Log", True, BLACK)
         self.screen.blit(log_title, (log_area.x + 10, log_area.y + 5))
         
-        # Add indicator if there are more logs than shown and show count
-        if len(self.transfer_logs) > 5:
-            more_logs_text = f"(+{len(self.transfer_logs) - 5} more logs)"
+        # MODIFIED - Show count of hidden logs (changed from 5 to 3)
+        if len(self.transfer_logs) > 3:
+            more_logs_text = f"(+{len(self.transfer_logs) - 3} more logs)"
             more_logs_surf = self.fonts['small'].render(more_logs_text, True, DARK_GRAY)
             self.screen.blit(more_logs_surf, (log_area.x + log_area.width - more_logs_surf.get_width() - 15, log_area.y + 10))
         
-        # Display the most recent logs - use reversed to have newest at the top
+        # MODIFIED - Show only last 3 logs (changed from 5 to 3)
         y_offset = log_area.y + 40
-        # Make a copy and select the last 5 entries to display (most recent)
-        display_logs = list(self.transfer_logs[-5:])
-        # Ensure these are shown in reverse order (newest at the top) - optional
-        # display_logs.reverse()  # Uncomment if you want newest at top
+        display_logs = list(self.transfer_logs[-3:])  # Show only last 3 logs
         
         for log in display_logs:
             log_surf = self.fonts['small'].render(log, True, DARK_GRAY)
@@ -635,9 +636,13 @@ class VPNApplication:
                 except Exception as e:
                     self.log_message(f"Error toggling VPN: {str(e)}")
             
-            # Test packet button - ONLY check in send mode
+            # MODIFIED - Updated button positions for side-by-side layout
             if self.connection_type == "send":
-                test_packet_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 80, 200, 50)
+                # Side-by-side buttons for sender
+                test_packet_button = pygame.Rect(self.WIDTH//2 - 210, self.HEIGHT - 80, 200, 50)
+                verify_button = pygame.Rect(self.WIDTH//2 + 10, self.HEIGHT - 80, 200, 50)
+                
+                # Test packet button handler
                 if test_packet_button.collidepoint(event.pos) and self.vpn_active:
                     try:
                         # Create a more distinctive test packet
@@ -667,11 +672,15 @@ class VPNApplication:
                     except Exception as e:
                         self.log_message(f"Error sending test packet: {str(e)}")
                         self.ui.show_popup(f"Error: {str(e)}", 2.0)
-            
-            # Then update handle_connected_screen_events to add logic for this button
-            verify_key_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 130, 200, 40)
-            if verify_key_button.collidepoint(event.pos) and self.vpn_active:
-                self.verify_vpn_keys()
+                
+                # Verify key button handler
+                if verify_button.collidepoint(event.pos) and self.vpn_active:
+                    self.verify_vpn_keys()
+            else:
+                # Only verify button for receiver
+                verify_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 80, 200, 50)
+                if verify_button.collidepoint(event.pos) and self.vpn_active:
+                    self.verify_vpn_keys()
     
     # Update the handle_key_events method to remove chat references
     def handle_key_events(self, event):
