@@ -80,7 +80,7 @@ class VPNApplication:
         # Modify encryption module
         self.modify_encryption_module()
     
-    # Update the setup_buttons method
+    # Update the setup_buttons method to fix the upload_key_button position
     def setup_buttons(self):
         """Initialize all button rectangles"""
         # Main buttons
@@ -93,10 +93,10 @@ class VPNApplication:
         # VPN toggle
         self.toggle_vpn_button = pygame.Rect(100, 150, 100, 100)
         
-        # Key management
-        self.new_key_button = pygame.Rect(self.WIDTH//2 - 250, 300, 220, 50)
-        self.existing_key_button = pygame.Rect(self.WIDTH//2 + 30, 300, 220, 50)
-        self.upload_key_button = pygame.Rect(self.WIDTH//2 + 30, 370, 220, 50)
+        # Key management - FIXED position for upload_key_button
+        self.new_key_button = pygame.Rect(self.WIDTH//2 - 270, 300, 240, 50)
+        self.existing_key_button = pygame.Rect(self.WIDTH//2 + 30, 300, 240, 50)
+        self.upload_key_button = pygame.Rect(self.WIDTH//2 + 30, 300, 240, 50) # Use same position as existing_key_button
         self.copy_key_button = pygame.Rect(self.WIDTH//2 + 310, 200, 80, 40)
         
         # IP input
@@ -317,11 +317,15 @@ class VPNApplication:
         
         # MODIFIED - Wider buttons for key management
         if self.connection_type == "send":
-            self.ui.draw_button("Generate New Key", pygame.Rect(self.WIDTH//2 - 270, 300, 240, 50))
-            self.ui.draw_button("Select Existing Key", pygame.Rect(self.WIDTH//2 + 30, 300, 240, 50))
+            self.new_key_button = pygame.Rect(self.WIDTH//2 - 270, 300, 240, 50)
+            self.existing_key_button = pygame.Rect(self.WIDTH//2 + 30, 300, 240, 50)
+            self.ui.draw_button("Generate New Key", self.new_key_button)
+            self.ui.draw_button("Select Existing Key", self.existing_key_button)
         else:  # receive mode
-            self.ui.draw_button("Enter Key", pygame.Rect(self.WIDTH//2 - 270, 300, 240, 50))
-            self.ui.draw_button("Upload Key File", pygame.Rect(self.WIDTH//2 + 30, 300, 240, 50))
+            self.new_key_button = pygame.Rect(self.WIDTH//2 - 270, 300, 240, 50)
+            self.upload_key_button = pygame.Rect(self.WIDTH//2 + 30, 300, 240, 50)
+            self.ui.draw_button("Enter Key", self.new_key_button)
+            self.ui.draw_button("Upload Key File", self.upload_key_button)
         
         # Draw key text area if key is being shown/entered
         if self.using_existing_key or self.active_input == "key":
@@ -338,8 +342,7 @@ class VPNApplication:
             
             # Button differs based on mode - Copy for Send, Paste for Receive
             if self.connection_type == "send":
-                self.ui.draw_button("Copy", self.copy_key_button, DARK_GREEN if not self.copy_button_clicked else GREEN, 
-                                  WHITE, button_id="copy_key")
+                self.ui.draw_button("Copy", self.copy_key_button, DARK_GREEN if not self.copy_button_clicked else GREEN, WHITE, button_id="copy_key")
             else:
                 self.ui.draw_button("Paste", self.copy_key_button, BLUE, WHITE)
             
@@ -518,6 +521,8 @@ class VPNApplication:
                     
             # Now handle the key management buttons
             if self.connection_type == "send":
+                self.new_key_button = pygame.Rect(self.WIDTH//2 - 270, 300, 240, 50)
+                self.existing_key_button = pygame.Rect(self.WIDTH//2 + 30, 300, 240, 50)
                 if self.new_key_button.collidepoint(event.pos):
                     # Generate a new key and store in memory
                     try:
@@ -536,6 +541,8 @@ class VPNApplication:
                     if self.using_existing_key:
                         self.ui.show_popup("Key loaded successfully")
             else:  # receive mode
+                self.new_key_button = pygame.Rect(self.WIDTH//2 - 270, 300, 240, 50)
+                self.upload_key_button = pygame.Rect(self.WIDTH//2 + 30, 300, 240, 50)
                 if self.new_key_button.collidepoint(event.pos):
                     # Activate a text input for the key
                     self.active_input = "key"
@@ -645,9 +652,34 @@ class VPNApplication:
                 
                 # Test packet button handler
                 if test_packet_button.collidepoint(event.pos) and self.vpn_active:
-                    # Test packet handler code stays the same
-                    # ...
-                    pass
+                    try:
+                    # Create a more distinctive test packet
+                        test_data = f"EXPLICIT_TEST_PACKET_{time.time()}"
+                        self.log_message(f"Sending test packet: {test_data}")
+                        
+                        # Use direct method from vpn module for more reliable sending
+                        from vpn import active_connections
+                        
+                        # Get the correct connection from active connections
+                        connection_id = f"{self.entered_ip}:8989"  # Hardcoded port for now
+                        if connection_id in active_connections:
+                            sock = active_connections[connection_id]
+                            from vpn import send_message
+                            send_result = send_message(sock, test_data)
+                            if send_result:
+                                self.log_message("Test packet sent directly to connection")
+                                self.ui.show_popup("Test packet sent", 2.0)
+                            else:
+                                self.log_message("Failed to send test packet directly")
+                                self.ui.show_popup("Failed to send test packet", 2.0)
+                        else:
+                            # Fall back to queue if direct connection not found
+                            self.log_message("No active connection found, queueing test packet")
+                            queue_message(test_data)
+                            self.ui.show_popup("Test packet queued for sending", 2.0)
+                    except Exception as e:
+                        self.log_message(f"Error sending test packet: {str(e)}")
+                        self.ui.show_popup(f"Error: {str(e)}", 2.0)
                 
                 # Verify key button handler
                 if verify_button.collidepoint(event.pos) and self.vpn_active:
