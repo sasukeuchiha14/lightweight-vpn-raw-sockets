@@ -76,6 +76,9 @@ class VPNApplication:
         # Add refresh timer for UI updates
         self.last_ui_refresh = 0
         self.ui_refresh_interval = 0.5  # seconds
+        
+        # Modify encryption module
+        self.modify_encryption_module()
     
     # Update the setup_buttons method
     def setup_buttons(self):
@@ -179,37 +182,25 @@ class VPNApplication:
     
     # Update the start_vpn_thread method to include key checks
     def start_vpn_thread(self):
-        """Start VPN in a separate thread with improved stability and key checks"""
+        """Start VPN with in-memory key for consistent cross-platform behavior"""
         try:
-            # Verify we can load the key before connecting
-            try:
-                from encryption import load_key
-                key = load_key()
-                if len(key) != 32:  # Must be 32 bytes (256 bits)
-                    self.log_message(f"Warning: Key size is {len(key)} bytes, expected 32 bytes")
-                    self.ui.show_popup("Warning: Encryption key may be invalid", 3.0)
-            except Exception as key_error:
-                self.log_message(f"Error loading encryption key: {str(key_error)}")
-                self.ui.show_popup("Error loading encryption key", 3.0)
+            # First make sure we have a valid key in memory
+            from encryption import load_key
+            key = load_key()  # This will use our consistent in-memory version
+            
+            if key is None or len(key) != 32:
+                self.log_message("Invalid key in memory")
+                self.ui.show_popup("Invalid encryption key", 2.0)
                 return
                 
-            # Add this to the start_vpn_thread method right after loading the key:
-            from encryption import normalize_key_string
-            self.log_message("Enforcing consistent key format...")
-            try:
-                # This will handle the key in a platform-independent way
-                key_text = key.hex()
-                # Get a deterministic fingerprint that will be identical across systems
-                fixed_fingerprint = hashlib.sha256(key).hexdigest()[:16]
-                self.log_message(f"Key verification hash: {fixed_fingerprint}")
-                self.ui.show_popup(f"Key verification hash: {fixed_fingerprint}", 3.0)
-            except Exception as e:
-                self.log_message(f"Key consistency check failed: {str(e)}")
-                
-            # First make sure any previous VPN is stopped
-            stop_vpn()
+            # Get a deterministic fingerprint
+            key_hex = key.hex()
+            fixed_fingerprint = hashlib.sha256(key).hexdigest()[:16]
+            self.log_message(f"Using key fingerprint: {key_hex[:8]}...{key_hex[-8:]}")
+            self.log_message(f"Key verification hash: {fixed_fingerprint}")
             
-            # Short delay to ensure cleanup
+            # Rest of the method remains unchanged...
+            stop_vpn()
             time.sleep(0.5)
             
             # Reset connection statistics
@@ -229,9 +220,6 @@ class VPNApplication:
             
             self.vpn_active = True
             self.transfer_logs.append("VPN connection initialized")
-            
-            # Log key fingerprint for reference
-            self.check_key_compatibility()
             
         except Exception as e:
             self.log_message(f"Error starting VPN: {str(e)}")
@@ -496,6 +484,9 @@ class VPNApplication:
     # Update handle_config_screen_events to add the port test for both modes
     def handle_config_screen_events(self, event):
         """Handle events for the configuration screen"""
+        # Import required functions at the method level to avoid UnboundLocalError
+        from encryption import generate_key, load_key, save_key
+        
         if event.type == pygame.MOUSEBUTTONDOWN:
             if self.back_button.collidepoint(event.pos):
                 self.current_state = self.STATE_IP_ENTRY
@@ -522,11 +513,16 @@ class VPNApplication:
             # Now handle the key management buttons
             if self.connection_type == "send":
                 if self.new_key_button.collidepoint(event.pos):
-                    # Generate a new key and show popup
-                    self.key_text, self.using_existing_key = self.key_manager.handle_key_management(
-                        "new", self.key_text, generate_key, load_key, save_key)
-                    if self.using_existing_key:
-                        self.ui.show_popup("New key generated and saved to vpn_key.txt")
+                    # Generate a new key and store in memory
+                    try:
+                        key_bytes = generate_key(local=True)
+                        self.key_text = key_bytes.hex()
+                        self.set_memory_key(self.key_text)
+                        self.using_existing_key = True
+                        self.ui.show_popup("New key generated and saved to memory")
+                    except Exception as e:
+                        self.log_message(f"Error generating key: {str(e)}")
+                        self.ui.show_popup("Error generating key", 2.0)
                 elif self.existing_key_button.collidepoint(event.pos):
                     # Use file dialog to select existing key
                     self.key_text, self.using_existing_key = self.key_manager.handle_key_management(
@@ -551,11 +547,12 @@ class VPNApplication:
                 connect_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 100, 200, 50)
                 if connect_button.collidepoint(event.pos):
                     if self.active_input == "key":
-                        previous_status = self.using_existing_key
-                        # Use the consistent key function instead of key_manager
-                        self.key_text, self.using_existing_key = self.ensure_consistent_key(self.key_text)
-                        if self.using_existing_key and not previous_status:
-                            self.ui.show_popup("Key saved successfully")
+                        # Replace the ensure_consistent_key call with direct memory setting
+                        if self.set_memory_key(self.key_text):
+                            self.using_existing_key = True
+                            self.ui.show_popup("Key saved to memory", 2.0)
+                        else:
+                            self.ui.show_popup("Invalid key format", 2.0)
                     if self.using_existing_key:  # Only connect if we have a valid key
                         self.current_state = self.STATE_CONNECTED
                         self.start_vpn_thread()
@@ -578,11 +575,16 @@ class VPNApplication:
                     if clipboard_text:
                         # Filter out non-hex characters
                         hex_chars = ''.join(c for c in clipboard_text if c.lower() in "0123456789abcdef")
-                        if hex_chars:
-                            self.key_text = hex_chars
-                            self.ui.show_popup("Key pasted from clipboard")
+                        if hex_chars and len(hex_chars) >= 64:
+                            self.key_text = hex_chars[:64]  # Take exactly 64 chars
+                            # Store in memory immediately
+                            if self.set_memory_key(self.key_text):
+                                self.using_existing_key = True
+                                self.ui.show_popup("Key pasted and stored in memory")
+                            else:
+                                self.ui.show_popup("Error storing pasted key", 2.0)
                         else:
-                            self.ui.show_popup("No valid key found in clipboard")
+                            self.ui.show_popup(f"Invalid key in clipboard (length: {len(hex_chars)})", 2.0)
     
     # Update the handle_connected_screen_events method to fix test packet sending
     def handle_connected_screen_events(self, event):
@@ -1033,6 +1035,106 @@ class VPNApplication:
         
         pygame.quit()
         stop_vpn()
+
+    # Add this at class level in VPNApplication class
+    def modify_encryption_module(self):
+        """Replace the standard encryption key handling with in-memory consistent version"""
+        import encryption
+        import sys
+        
+        # Store the original functions for reference
+        original_load_key = encryption.load_key
+        
+        # Create an in-memory key store
+        self._in_memory_key = None
+        
+        # Replace the load_key function with our in-memory version
+        def consistent_load_key(local=False, direct_key=None):
+            """Load key with priority: 1) in-memory, 2) direct input, 3) file"""
+            # First check if we have an in-memory key
+            if self._in_memory_key is not None:
+                return self._in_memory_key
+                
+            # If direct key provided, use and store it
+            if direct_key:
+                # Clean up the key string
+                clean_key = ''.join(c for c in direct_key if c.lower() in '0123456789abcdef')
+                if len(clean_key) == 64:
+                    # Convert to bytes and store in memory
+                    key_bytes = bytes.fromhex(clean_key)
+                    self._in_memory_key = key_bytes
+                    return key_bytes
+            
+            # Fall back to original method
+            try:
+                key = original_load_key(local, direct_key)
+                # Store for future use
+                self._in_memory_key = key
+                return key
+            except Exception as e:
+                self.log_message(f"Error in consistent_load_key: {str(e)}")
+                return None
+        
+        # Replace the original functions with our versions
+        encryption.load_key = consistent_load_key
+        
+        # Add a method to explicitly set the key
+        def set_memory_key(self, key_hex):
+            """Set the encryption key in memory from hex string"""
+            try:
+                # Clean up the key string
+                clean_key = ''.join(c for c in key_hex if c.lower() in '0123456789abcdef')
+                if len(clean_key) != 64:
+                    self.log_message(f"Invalid key length: {len(clean_key)}, expected 64")
+                    return False
+                    
+                # Store the key in memory
+                self._in_memory_key = bytes.fromhex(clean_key)
+                
+                # Optional: Also save to file for persistence
+                from encryption import save_key
+                save_key(self._in_memory_key, local=True)
+                
+                self.log_message(f"Key set in memory: {clean_key[:8]}...{clean_key[-8:]}")
+                return True
+            except Exception as e:
+                self.log_message(f"Error setting memory key: {str(e)}")
+                return False
+        
+        # Add the method to our class
+        self.set_memory_key = set_memory_key.__get__(self)
+
+    def verify_key_consistency(self):
+        """Test method to verify cross-platform key consistency"""
+        try:
+            # Get our in-memory key
+            if self._in_memory_key is None:
+                self.log_message("No key in memory!")
+                self.ui.show_popup("No key in memory!", 2.0)
+                return
+                
+            # Display key information
+            key_hex = self._in_memory_key.hex()
+            self.log_message(f"Memory key: {key_hex}")
+            self.log_message(f"Key length: {len(self._in_memory_key)} bytes")
+            
+            # Get fingerprints using different methods for verification
+            sha256_hash = hashlib.sha256(self._in_memory_key).hexdigest()
+            md5_hash = hashlib.md5(self._in_memory_key).hexdigest()
+            
+            self.log_message(f"SHA-256: {sha256_hash[:16]}...")
+            self.log_message(f"MD5: {md5_hash}")
+            
+            # Show popup with the key fingerprint
+            fingerprint = f"{key_hex[:8]}...{key_hex[-8:]}"
+            self.ui.show_popup(f"Key fingerprint: {fingerprint}", 4.0)
+            
+            # Update transfer log
+            self.transfer_logs.append(f"Key fingerprint: {fingerprint}")
+            
+        except Exception as e:
+            self.log_message(f"Error verifying key: {str(e)}")
+            self.ui.show_popup(f"Error: {str(e)}", 2.0)
 
 if __name__ == "__main__":
     app = VPNApplication()

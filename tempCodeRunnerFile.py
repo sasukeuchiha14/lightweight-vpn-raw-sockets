@@ -1,1 +1,1 @@
-generate_key
+verify_key_consistency
