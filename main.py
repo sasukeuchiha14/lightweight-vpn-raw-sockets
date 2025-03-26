@@ -352,6 +352,10 @@ class VPNApplication:
             self.ui.draw_button("Test Connection", port_test_button, BLUE)
         else:
             self.ui.draw_button("Test Listening Port", port_test_button, BLUE)
+        
+        if self.using_existing_key:
+            force_key_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 150, 200, 40)
+            self.ui.draw_button("Force Identical Key", force_key_button, RED)
     
     # Update the draw_connected_screen method to only show test packet button in send mode
     def draw_connected_screen(self):
@@ -535,12 +539,22 @@ class VPNApplication:
                     self.active_input = "key"
                     self.key_text = ""
                 elif self.upload_key_button.collidepoint(event.pos):
-                    # Use file dialog
-                    previous_key = self.key_text
-                    self.key_text, self.using_existing_key = self.key_manager.handle_key_management(
-                        "upload", self.key_text, generate_key, load_key, save_key)
-                    if self.using_existing_key and self.key_text != previous_key:
-                        self.ui.show_popup("Key file uploaded successfully")
+                    # Use file dialog but with direct memory setting
+                    try:
+                        # Use file dialog
+                        from encryption import generate_key, load_key, save_key
+                        imported_key = self.key_manager.open_file_dialog()
+                        if imported_key:
+                            self.key_text = imported_key
+                            # Use our memory setter to ensure consistency
+                            if self.set_memory_key(self.key_text):
+                                self.using_existing_key = True
+                                self.ui.show_popup("Key uploaded and stored in memory", 2.0)
+                            else:
+                                self.ui.show_popup("Invalid key format in file", 2.0)
+                    except Exception as e:
+                        self.log_message(f"Error uploading key: {str(e)}")
+                        self.ui.show_popup(f"Upload error: {str(e)}", 2.0)
             
             # Check for connect button if key is selected
             if self.using_existing_key or self.active_input == "key":
@@ -585,6 +599,11 @@ class VPNApplication:
                                 self.ui.show_popup("Error storing pasted key", 2.0)
                         else:
                             self.ui.show_popup(f"Invalid key in clipboard (length: {len(hex_chars)})", 2.0)
+            
+            force_key_button = pygame.Rect(self.WIDTH//2 - 100, self.HEIGHT - 150, 200, 40)
+            if self.using_existing_key and force_key_button.collidepoint(event.pos):
+                if self.force_identical_keys(self.key_text):
+                    self.ui.show_popup("Key forced to identical representation", 2.0)
     
     # Update the handle_connected_screen_events method to fix test packet sending
     def handle_connected_screen_events(self, event):
@@ -1036,72 +1055,89 @@ class VPNApplication:
         pygame.quit()
         stop_vpn()
 
-    # Add this at class level in VPNApplication class
+    # Replace your modify_encryption_module method with this version
     def modify_encryption_module(self):
         """Replace the standard encryption key handling with in-memory consistent version"""
         import encryption
-        import sys
         
-        # Store the original functions for reference
+        # Create a class-level key storage container
+        self._in_memory_key = None
+        self._direct_key_override = True  # Flag to ensure we ALWAYS use memory key
+        
+        # Store original function
         original_load_key = encryption.load_key
         
-        # Create an in-memory key store
-        self._in_memory_key = None
-        
-        # Replace the load_key function with our in-memory version
+        # Define new function that prioritizes memory key
         def consistent_load_key(local=False, direct_key=None):
-            """Load key with priority: 1) in-memory, 2) direct input, 3) file"""
-            # First check if we have an in-memory key
-            if self._in_memory_key is not None:
+            """Always use in-memory key when available"""
+            # Direct memory key takes absolute precedence 
+            if self._direct_key_override and self._in_memory_key is not None:
                 return self._in_memory_key
                 
-            # If direct key provided, use and store it
+            # If direct key provided, normalize and use it
             if direct_key:
-                # Clean up the key string
+                # Normalize to exact hex string
                 clean_key = ''.join(c for c in direct_key if c.lower() in '0123456789abcdef')
-                if len(clean_key) == 64:
-                    # Convert to bytes and store in memory
-                    key_bytes = bytes.fromhex(clean_key)
-                    self._in_memory_key = key_bytes
+                if len(clean_key) >= 64:  # Ensure we have enough hex chars
+                    key_bytes = bytes.fromhex(clean_key[:64])  # Take exactly 32 bytes
+                    # Store in memory for future use
+                    self._in_memory_key = key_bytes 
                     return key_bytes
-            
-            # Fall back to original method
+                    
+            # Fall back to file-based method only if no memory key
             try:
-                key = original_load_key(local, direct_key)
-                # Store for future use
-                self._in_memory_key = key
-                return key
+                key = original_load_key(local)
+                # Don't overwrite memory key if we have one
+                if self._in_memory_key is None:
+                    self._in_memory_key = key
+                else:
+                    # If we already have a memory key, return it instead
+                    return self._in_memory_key
+                return key 
             except Exception as e:
-                self.log_message(f"Error in consistent_load_key: {str(e)}")
+                self.log_message(f"Error loading key: {str(e)}")
                 return None
         
-        # Replace the original functions with our versions
+        # Replace encryption module's load_key with our version
         encryption.load_key = consistent_load_key
         
-        # Add a method to explicitly set the key
+        # Define setter method for memory key
         def set_memory_key(self, key_hex):
-            """Set the encryption key in memory from hex string"""
+            """Set encryption key directly in memory - guaranteed to be used"""
             try:
-                # Clean up the key string
+                # Clean and normalize hex string
                 clean_key = ''.join(c for c in key_hex if c.lower() in '0123456789abcdef')
-                if len(clean_key) != 64:
-                    self.log_message(f"Invalid key length: {len(clean_key)}, expected 64")
+                
+                if len(clean_key) < 64:
+                    self.log_message(f"Warning: Key too short ({len(clean_key)}), needs 64 hex chars")
+                    self.ui.show_popup("Key too short - needs 64 hex characters", 2.0)
                     return False
-                    
-                # Store the key in memory
-                self._in_memory_key = bytes.fromhex(clean_key)
                 
-                # Optional: Also save to file for persistence
-                from encryption import save_key
-                save_key(self._in_memory_key, local=True)
+                # Take exactly 64 chars (32 bytes)    
+                key_bytes = bytes.fromhex(clean_key[:64])
                 
-                self.log_message(f"Key set in memory: {clean_key[:8]}...{clean_key[-8:]}")
+                # Store in class variable - this will be used for all encryption/decryption
+                self._in_memory_key = key_bytes
+                self._direct_key_override = True
+                
+                # Show fingerprint for verification
+                key_hex = key_bytes.hex()
+                fingerprint = f"{key_hex[:8]}...{key_hex[-8:]}"
+                self.log_message(f"Key set in memory: {fingerprint}")
+                
+                # Also save to file as backup (but we'll use memory version)
+                try:
+                    from encryption import save_key
+                    save_key(key_bytes, local=True)
+                except Exception as save_err:
+                    self.log_message(f"Note: Could not save key to file: {str(save_err)}")
+                
                 return True
             except Exception as e:
                 self.log_message(f"Error setting memory key: {str(e)}")
                 return False
         
-        # Add the method to our class
+        # Attach method to class instance
         self.set_memory_key = set_memory_key.__get__(self)
 
     def verify_key_consistency(self):
@@ -1135,6 +1171,44 @@ class VPNApplication:
         except Exception as e:
             self.log_message(f"Error verifying key: {str(e)}")
             self.ui.show_popup(f"Error: {str(e)}", 2.0)
+
+    def force_identical_keys(self, key_hex):
+        """Ensure identical keys are used on both sides with direct bytes manipulation"""
+        try:
+            # Clean up the key - remove ALL non-hex characters
+            clean_key = ''.join(c for c in key_hex if c.lower() in '0123456789abcdef')
+            
+            if len(clean_key) < 64:
+                self.log_message(f"Key too short: {len(clean_key)} chars, needs 64")
+                return False
+                
+            # Take exactly 64 chars, and convert to bytes
+            key_bytes = bytes.fromhex(clean_key[:64])
+            
+            # Store directly in memory, bypassing any platform-specific code
+            self._in_memory_key = key_bytes
+            self._direct_key_override = True
+            
+            # Print diagnostics of exactly what we're using
+            key_hex = key_bytes.hex()
+            self.log_message(f"Direct memory key set: {key_hex[:8]}...{key_hex[-8:]}")
+            self.log_message(f"Key length: {len(key_bytes)} bytes")
+            self.log_message(f"Full key hex: {key_hex}")
+            
+            # Create a SHA-256 hash of the key for verification
+            # This will be IDENTICAL on both platforms if the key is the same
+            import hashlib
+            hash_id = hashlib.sha256(key_bytes).hexdigest()[:16]
+            self.log_message(f"Key verification hash: {hash_id}")
+            
+            # Update UI with confirmation
+            self.ui.show_popup(f"✅ Key set: {key_hex[:8]}...{key_hex[-8:]}", 3.0)
+            self.transfer_logs.append(f"Key fingerprint: {key_hex[:8]}...{key_hex[-8:]}")
+            
+            return True
+        except Exception as e:
+            self.log_message(f"Error forcing key: {str(e)}")
+            return False
 
 if __name__ == "__main__":
     app = VPNApplication()
