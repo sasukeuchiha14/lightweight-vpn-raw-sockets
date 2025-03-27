@@ -1,1 +1,0 @@
-verify_key_consistency
