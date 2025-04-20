@@ -1214,7 +1214,7 @@ class VPNApplication:
             
             # Create a SHA-256 hash of the key for verification
             # This will be IDENTICAL on both platforms if the key is the same
-            import hashlib
+            
             hash_id = hashlib.sha256(key_bytes).hexdigest()[:16]
             self.log_message(f"Key verification hash: {hash_id}")
             

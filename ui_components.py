@@ -89,19 +89,6 @@ class UIComponents:
             self.screen.blit(log_surf, (log_area.x + 15, y_offset))
             y_offset += 20
     
-    def draw_chat(self, chat_area, chat_messages):
-        """Draw chat messages area"""
-        pygame.draw.rect(self.screen, LIGHT_GRAY, chat_area, border_radius=5)
-        
-        title_surf = self.font.render("Chat", True, BLACK)
-        self.screen.blit(title_surf, (chat_area.x + 10, chat_area.y + 5))
-        
-        y_offset = chat_area.y + 40
-        for msg in chat_messages[-10:]:  # Show only last 10 messages
-            msg_surf = self.small_font.render(msg, True, BLACK)
-            self.screen.blit(msg_surf, (chat_area.x + 15, y_offset))
-            y_offset += 20
-    
     def show_popup(self, message, duration=2.0):
         """Show a popup notification message"""
         self.popup_message = message

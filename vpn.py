@@ -84,7 +84,6 @@ def send_message(sock, message):
             message_callback(f"Error sending message: {str(e)}", "error")
         return False
 
-# Update handle_incoming_data function to ensure proper message processing
 
 def handle_incoming_data(sock, client_address):
     """Handle incoming data from a connected client with improved error handling"""
