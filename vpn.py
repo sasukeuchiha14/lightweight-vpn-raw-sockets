@@ -56,9 +56,17 @@ def send_message(sock, message):
         if message_callback:
             message_callback(f"Preparing to send message ({len(message)} bytes)", "info")
             
+        # Print original data for sender
+        print(f"\n===== SENDER DATA =====")
+        print(f"Original data: {message}")
+            
         # Encrypt the message
         encrypted_data = encrypt_data(message.encode('utf-8'))
         
+        # Print encrypted version (first 40 bytes + length for brevity)
+        print(f"Encrypted data: {encrypted_data[:40].hex()}... [{len(encrypted_data)} bytes]")
+        print("=====================\n")
+            
         # Send the data with a size prefix
         message_size = len(encrypted_data)
         size_bytes = message_size.to_bytes(4, byteorder='big')  # 4 bytes for message size
@@ -85,6 +93,7 @@ def send_message(sock, message):
         return False
 
 
+# Update the handle_incoming_data function to add debugging information
 def handle_incoming_data(sock, client_address):
     """Handle incoming data from a connected client with improved error handling"""
     global running
@@ -125,16 +134,24 @@ def handle_incoming_data(sock, client_address):
                 if message_callback:
                     message_callback(f"Received complete message ({bytes_received} bytes)", "info")
                 
+                # Print encrypted data for receiver
+                print(f"\n===== RECEIVER DATA =====")
+                print(f"Received encrypted data: {encrypted_data[:40].hex()}... [{len(encrypted_data)} bytes]")
+                
                 try:
                     # Decrypt the message
                     decrypted_data = decrypt_data(encrypted_data)
                     message = decrypted_data.decode('utf-8')
                     
+                    # Print decrypted data
+                    print(f"Decrypted data: {message}")
+                    print("=======================\n")
+                    
                     # Process the received message
                     if message_callback:
                         # For certain system messages, don't count as received data packets
-                        if message == "ping" or message == "keep-alive":
-                            message_callback(f"Received keepalive ping", "info")
+                        if message == "Hello! World." or message == "keep-alive":
+                            message_callback(f"Received keepalive message: '{message}'", "info")
                         else:
                             # This is the critical line to make sure packets appear in the transfer log
                             message_callback(message, "message")
@@ -142,17 +159,22 @@ def handle_incoming_data(sock, client_address):
                 except Exception as e:
                     if message_callback:
                         message_callback(f"Error decrypting message: {str(e)}", "error")
-                        try:
-                            # Display key fingerprint for debugging
-                            from encryption import load_key
-                            key_hex = load_key().hex()
-                            key_info = f"Key fingerprint: {key_hex[:8]}...{key_hex[-8:]}"
-                            message_callback(f"Using key: {key_info}", "info")
-                        except Exception as key_error:
-                            message_callback(f"Could not read key: {str(key_error)}", "error")
-                        
-                        # Log as a failed packet - don't count in statistics
-                        message_callback(f"DECRYPTION_FAILED_{time.time()}", "decryption_failed")
+                    
+                    # Print decryption failure
+                    print(f"Decryption FAILED: {str(e)}")
+                    print("=======================\n")
+                    
+                    try:
+                        # Display key fingerprint for debugging
+                        from encryption import load_key
+                        key_hex = load_key().hex()
+                        key_info = f"Key fingerprint: {key_hex[:8]}...{key_hex[-8:]}"
+                        message_callback(f"Using key: {key_info}", "info")
+                    except Exception as key_error:
+                        message_callback(f"Could not read key: {str(key_error)}", "error")
+                    
+                    # Log as a failed packet - don't count in statistics
+                    message_callback(f"DECRYPTION_FAILED_{time.time()}", "decryption_failed")
                 
             except socket.timeout:
                 # Just a timeout, continue the loop
@@ -266,6 +288,7 @@ def vpn_sender(target_ip, message=None):
         last_activity = time.time()
         ping_interval = 15  # Send ping every 15 seconds if no activity (shorter for NAT)
         retry_interval = 0.5  # Retry failed messages after this delay
+        keep_alive_message = "Hello! World."  # Changed from "ping" to a more friendly message
         
         while running:
             # Check if there are messages in the queue
@@ -294,8 +317,8 @@ def vpn_sender(target_ip, message=None):
             current_time = time.time()
             if current_time - last_activity > ping_interval:
                 if message_callback:
-                    message_callback("Sending keepalive ping", "info")
-                if send_message(sock, "ping"):
+                    message_callback(f"Sending keepalive message: '{keep_alive_message}'", "info")
+                if send_message(sock, keep_alive_message):
                     last_activity = current_time
             
             # Sleep to prevent CPU hogging

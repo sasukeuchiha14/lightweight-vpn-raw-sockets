@@ -79,6 +79,9 @@ class VPNApplication:
         
         # Modify encryption module
         self.modify_encryption_module()
+        
+        # Add customizable test packet content
+        self.custom_test_packet = "My Custom Message 1 for Testing"
     
     # Update the setup_buttons method to fix the upload_key_button position
     def setup_buttons(self):
@@ -650,11 +653,11 @@ class VPNApplication:
                 test_packet_button = pygame.Rect(self.WIDTH//2 - 225, self.HEIGHT - 80, 215, 50)
                 verify_button = pygame.Rect(self.WIDTH//2 + 10, self.HEIGHT - 80, 215, 50)
                 
-                # Test packet button handler
+                # Update the test packet button handler in handle_connected_screen_events method
                 if test_packet_button.collidepoint(event.pos) and self.vpn_active:
                     try:
-                    # Create a more distinctive test packet
-                        test_data = f"EXPLICIT_TEST_PACKET_{time.time()}"
+                        # Use the custom test packet variable instead of hardcoded string
+                        test_data = f"TEST_PACKET_{self.custom_test_packet}"
                         self.log_message(f"Sending test packet: {test_data}")
                         
                         # Use direct method from vpn module for more reliable sending
